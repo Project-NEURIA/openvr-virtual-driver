@@ -1,0 +1,7 @@
+{
+    "ai_vr": {
+        "renderWidth": 1920,
+        "renderHeight": 1080,
+        "displayFrequency": 90
+    }
+}

@@ -1,0 +1,16 @@
+# Build
+build/
+ai_vr/bin/
+
+# Logs
+*.log
+
+# Python
+demo/.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.vs/
+.vscode/
+*.user
