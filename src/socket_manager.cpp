@@ -49,7 +49,7 @@ std::expected<int, std::string> SocketManager::Init()
     }
 
     // Start connection thread
-    connectionThread = std::jthread(&SocketManager::Connect, this);
+    connectionThread = std::jthread([this](std::stop_token st) { Connect(st); });
 
     return 0;
 }
@@ -66,7 +66,7 @@ void SocketManager::Connect(std::stop_token st)
         connected = true;
 
         // Start receiver thread
-        receiverThread = std::jthread(&SocketManager::Receive, this);
+        receiverThread = std::jthread([this](std::stop_token st) { Receive(st); });
 
         // Wait for receiver to finish (client disconnected)
         receiverThread.join();

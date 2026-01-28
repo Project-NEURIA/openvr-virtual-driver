@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(openvr_virtual_driver)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # OpenVR
@@ -16,6 +16,7 @@ add_library(driver_${DRIVER_NAME} SHARED
     src/hmd_driver_factory.cpp
     src/device_provider.cpp
     src/hmd_device_driver.cpp
+    src/socket_manager.cpp
 )
 
 target_include_directories(driver_${DRIVER_NAME} PRIVATE
