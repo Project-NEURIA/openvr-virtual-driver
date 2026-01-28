@@ -1,5 +1,6 @@
 #include <vector>
 #include <optional>
+#include <expected>
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <winsock2.h>
@@ -38,18 +39,21 @@ class SocketManager
 public:
     SocketManager();
     ~SocketManager();
-    Init();
+    std::expected<int, std::string> Init();
     std::optional<Position> GetNextPosition();
     bool SendFrame(const Frame& frame);
 
 private:
-    void SocketManager::Receive(std::stop_token st);
+    void Connect(std::stop_token st);
+    void Receive(std::stop_token st);
 
     std::vector<Position> pos;
     SOCKET listenSocket;
     SOCKET clientSocket;
 
+    std::jthread connectionThread;
     std::jthread receiverThread;
+    std::atomic<bool> connected{false};
     std::mutex mtx;
     std::mutex sendMtx;
 };

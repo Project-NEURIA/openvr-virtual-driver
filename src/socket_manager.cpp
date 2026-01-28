@@ -4,8 +4,7 @@
 
 SocketManager::SocketManager() :
     listenSocket(INVALID_SOCKET),
-    clientSocket(INVALID_SOCKET),
-    receiverThread(&SocketManager::Receive, this)
+    clientSocket(INVALID_SOCKET)
     {}
 
 SocketManager::~SocketManager()
@@ -19,24 +18,15 @@ SocketManager::~SocketManager()
 std::expected<int, std::string> SocketManager::Init()
 {
     WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2,2), &wsa) != 0) 
+    if (WSAStartup(MAKEWORD(2,2), &wsa) != 0)
     {
         return std::unexpected("WSAStartup failed");
     }
 
     listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listenSocket == INVALID_SOCKET) 
+    if (listenSocket == INVALID_SOCKET)
     {
         return std::unexpected("socket failed");
-    }
-
-    sockaddr_in serverAddr{};
-    serverAddr.sin_family = AF_INET;
-    listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (listenSocket == INVALID_SOCKET) 
-    {
-        return std::unexpected("WSAStartup failed");
     }
 
     sockaddr_in serverAddr{};
@@ -44,45 +34,61 @@ std::expected<int, std::string> SocketManager::Init()
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     serverAddr.sin_port = htons(21213);
 
-    if (bind(listenSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) 
+    if (bind(listenSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR)
     {
-        return std::unexpected("WSAStartup failed");
+        return std::unexpected("bind failed");
     }
 
-    if (listen(listenSocket, SOMAXCONN) == SOCKET_ERROR) 
+    if (listen(listenSocket, SOMAXCONN) == SOCKET_ERROR)
     {
-        return std::unexpected("WSAStartup failed");
+        return std::unexpected("listen failed");
     }
 
-    std::cout << "Listening on port 21213...\n";
+    // Start connection thread
+    connectionThread = std::jthread(&SocketManager::Connect, this);
 
-    clientSocket = accept(listenSocket, nullptr, nullptr);
-    if (clientSocket == INVALID_SOCKET) 
-    {
-        return std::unexpected("WSAStartup failed");
-    }
-
-    std::cout << "Client connected!\n";
-    
     return 0;
+}
+
+void SocketManager::Connect(std::stop_token st)
+{
+    while (!st.stop_requested())
+    {
+        // Wait for client connection
+        clientSocket = accept(listenSocket, nullptr, nullptr);
+        if (clientSocket == INVALID_SOCKET)
+            continue;
+
+        connected = true;
+
+        // Start receiver thread
+        receiverThread = std::jthread(&SocketManager::Receive, this);
+
+        // Wait for receiver to finish (client disconnected)
+        receiverThread.join();
+
+        connected = false;
+        closesocket(clientSocket);
+        clientSocket = INVALID_SOCKET;
+    }
 }
 
 void SocketManager::Receive(std::stop_token st)
 {
-    while (!st.stop_requested())
+    while (!st.stop_requested() && connected)
     {
         // Read message header
         MsgHeader msgHeader;
         int bytes = recv(clientSocket, reinterpret_cast<char*>(&msgHeader), sizeof(msgHeader), MSG_WAITALL);
-        if (bytes != sizeof(msgHeader))
-            continue;
+        if (bytes <= 0)
+            break;  // Connection lost
 
         if (msgHeader.type == MsgType::Position && msgHeader.size == sizeof(Position))
         {
             Position position;
             bytes = recv(clientSocket, reinterpret_cast<char*>(&position), sizeof(Position), MSG_WAITALL);
-            if (bytes != sizeof(Position))
-                continue;
+            if (bytes <= 0)
+                break;  // Connection lost
 
             std::unique_lock lock(mtx);
             pos.push_back(position);
@@ -108,6 +114,9 @@ std::optional<Position> SocketManager::GetNextPosition()
 
 bool SocketManager::SendFrame(const Frame& frame)
 {
+    if (!connected)
+        return false;
+
     std::lock_guard<std::mutex> lock(sendMtx);
 
     uint32_t pixelDataSize = frame.width * frame.height * 4;
