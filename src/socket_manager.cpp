@@ -1,5 +1,6 @@
 #include "socket_manager.h"
 #include <expected>
+#include <algorithm>
 
 SocketManager::SocketManager() :
     listenSocket(INVALID_SOCKET),
@@ -96,7 +97,29 @@ std::optional<PositionDTO> SocketManager::GetNextPosition()
     return p;
 }
 
-void Driver::SendFrameData(ID3D11Texture2D* pTexture, uint32_t eye, const vr::VRTextureBounds_t& bounds)
+bool SocketManager::SendPixels(const PixelData& pixels)
+{
+    uint32_t header[3] = { pixels.width, pixels.height, pixels.eye };
+
+    std::lock_guard<std::mutex> lock(m_socketMutex);
+
+    if (send(m_socket, reinterpret_cast<const char*>(header), sizeof(header), 0) == SOCKET_ERROR)
+    {
+        m_tcpConnected = false;
+        return false;
+    }
+
+    uint32_t totalSize = pixels.width * pixels.height * 4;
+    if (send(m_socket, reinterpret_cast<const char*>(pixels.data), totalSize, 0) == SOCKET_ERROR)
+    {
+        m_tcpConnected = false;
+        return false;
+    }
+
+    return true;
+}
+
+void SocketManager::SendFrameData(ID3D11Texture2D* pTexture, uint32_t eye, const vr::VRTextureBounds_t& bounds)
 {
     if (!m_tcpConnected || !pTexture)
         return;
@@ -156,34 +179,21 @@ void Driver::SendFrameData(ID3D11Texture2D* pTexture, uint32_t eye, const vr::VR
     if (cropX + cropW > m_stagingWidth) cropW = m_stagingWidth - cropX;
     if (cropY + cropH > m_stagingHeight) cropH = m_stagingHeight - cropY;
 
-    // Send header with cropped dimensions
-    uint32_t header[3] = { cropW, cropH, eye };
-
-    std::lock_guard<std::mutex> lock(m_socketMutex);
-
-    int sent = send(m_socket, reinterpret_cast<char*>(header), sizeof(header), 0);
-    if (sent == SOCKET_ERROR)
-    {
-        m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
-        m_tcpConnected = false;
-        return;
-    }
-
-    // Send cropped pixel data row by row
-    uint32_t rowSize = cropW * 4; // 4 bytes per pixel
+    // Copy cropped pixels into contiguous buffer
     uint8_t* srcData = static_cast<uint8_t*>(mapped.pData);
+    std::vector<uint8_t> buffer(cropW * cropH * 4);
 
     for (uint32_t y = 0; y < cropH; y++)
     {
-        uint8_t* rowStart = srcData + (cropY + y) * mapped.RowPitch + cropX * 4;
-        sent = send(m_socket, reinterpret_cast<char*>(rowStart), rowSize, 0);
-        if (sent == SOCKET_ERROR)
-        {
-            m_tcpConnected = false;
-            break;
-        }
+        const uint8_t* srcRow = srcData + (cropY + y) * mapped.RowPitch + cropX * 4;
+        uint8_t* dstRow = buffer.data() + y * cropW * 4;
+        std::copy(srcRow, srcRow + cropW * 4, dstRow);
     }
 
     m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
+
+    // Send pixels
+    PixelData pixels { buffer.data(), cropW, cropH, eye };
+    SendPixels(pixels);
 }
 
