@@ -89,6 +89,7 @@ private:
 
     // Networking
     SocketManager m_socketManager;
+    Position m_lastPosition = { 0.0, 1.6, 0.0, 1.0, 0.0, 0.0, 0.0 };
 
     // Frame counter
     std::atomic<uint64_t> m_frameCount{0};

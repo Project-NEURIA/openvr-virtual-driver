@@ -67,22 +67,31 @@ std::expected<int, std::string> SocketManager::Init()
     return 0;
 }
 
-void SocketManager::Receive(std::stop_token st) 
+void SocketManager::Receive(std::stop_token st)
 {
-    while (!st.stop_requested()) 
+    while (!st.stop_requested())
     {
-        char buffer[1024];
-        int bytes = recv(clientSocket, buffer, sizeof(buffer), 0);
+        // Read message header
+        MsgHeader msgHeader;
+        int bytes = recv(clientSocket, reinterpret_cast<char*>(&msgHeader), sizeof(msgHeader), MSG_WAITALL);
+        if (bytes != sizeof(msgHeader))
+            continue;
 
-        PositionDTO dto = json::parse(std::string(buffer, bytes));
-        
-        std::unique_lock lock(mtx);
-        pos.push_back(dto);
-        lock.unlock();
+        if (msgHeader.type == MsgType::Position && msgHeader.size == sizeof(Position))
+        {
+            Position position;
+            bytes = recv(clientSocket, reinterpret_cast<char*>(&position), sizeof(Position), MSG_WAITALL);
+            if (bytes != sizeof(Position))
+                continue;
+
+            std::unique_lock lock(mtx);
+            pos.push_back(position);
+            lock.unlock();
+        }
     }
 }
 
-std::optional<PositionDTO> SocketManager::GetNextPosition()
+std::optional<Position> SocketManager::GetNextPosition()
 {
     std::unique_lock lock(mtx);
     if (pos.empty()) 
@@ -90,26 +99,35 @@ std::optional<PositionDTO> SocketManager::GetNextPosition()
         return std::nullopt;
     }
 
-    PositionDTO p = pos.front();
+    Position p = pos.front();
     pos.erase(pos.begin());
     lock.unlock();
 
     return p;
 }
 
-bool SocketManager::SendFrame(const PixelData& pixels)
+bool SocketManager::SendFrame(const Frame& frame)
 {
-    uint32_t header[3] = { pixels.width, pixels.height, pixels.eye };
-
     std::lock_guard<std::mutex> lock(sendMtx);
 
-    if (send(clientSocket, reinterpret_cast<const char*>(header), sizeof(header), 0) == SOCKET_ERROR)
+    uint32_t pixelDataSize = frame.width * frame.height * 4;
+
+    // Send message header
+    MsgHeader msgHeader { MsgType::Frame, static_cast<uint32_t>(12 + pixelDataSize) };
+    if (send(clientSocket, reinterpret_cast<const char*>(&msgHeader), sizeof(msgHeader), 0) == SOCKET_ERROR)
     {
         return false;
     }
 
-    uint32_t totalSize = pixels.width * pixels.height * 4;
-    if (send(clientSocket, reinterpret_cast<const char*>(pixels.data), totalSize, 0) == SOCKET_ERROR)
+    // Send frame info (width, height, eye)
+    uint32_t frameInfo[3] = { frame.width, frame.height, frame.eye };
+    if (send(clientSocket, reinterpret_cast<const char*>(frameInfo), sizeof(frameInfo), 0) == SOCKET_ERROR)
+    {
+        return false;
+    }
+
+    // Send pixel data
+    if (send(clientSocket, reinterpret_cast<const char*>(frame.data), pixelDataSize, 0) == SOCKET_ERROR)
     {
         return false;
     }

@@ -116,6 +116,12 @@ void Driver::DebugRequest(const char* pchRequest, char* pchResponseBuffer, uint3
 
 vr::DriverPose_t Driver::GetPose()
 {
+    // Update with latest position from socket if available
+    if (auto newPos = m_socketManager.GetNextPosition())
+    {
+        m_lastPosition = *newPos;
+    }
+
     vr::DriverPose_t pose = {};
 
     pose.poseIsValid = true;
@@ -133,19 +139,16 @@ vr::DriverPose_t Driver::GetPose()
     pose.qDriverFromHeadRotation.y = 0.0;
     pose.qDriverFromHeadRotation.z = 0.0;
 
-    // Slow oscillating rotation (yaw)
-    double time = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    double angle = std::sin(time * 0.5) * 0.3;  // ~17 degrees back and forth
+    // Position from socket
+    pose.vecPosition[0] = m_lastPosition.x;
+    pose.vecPosition[1] = m_lastPosition.y;
+    pose.vecPosition[2] = m_lastPosition.z;
 
-    pose.vecPosition[0] = 0.0;
-    pose.vecPosition[1] = 1.6;
-    pose.vecPosition[2] = 0.0;
-
-    // Quaternion for Y-axis rotation
-    pose.qRotation.w = std::cos(angle / 2.0);
-    pose.qRotation.x = 0.0;
-    pose.qRotation.y = std::sin(angle / 2.0);
-    pose.qRotation.z = 0.0;
+    // Rotation from socket (quaternion)
+    pose.qRotation.w = m_lastPosition.qw;
+    pose.qRotation.x = m_lastPosition.qx;
+    pose.qRotation.y = m_lastPosition.qy;
+    pose.qRotation.z = m_lastPosition.qz;
 
     return pose;
 }
@@ -427,7 +430,7 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
         m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
 
         // Send pixels via socket manager
-        PixelData pixels { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
+        Frame pixels { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
         m_socketManager.SendFrame(pixels);
     }
 }

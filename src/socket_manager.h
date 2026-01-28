@@ -5,12 +5,28 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-struct PositionDTO {
-    // Something here
+enum class MsgType : uint32_t {
+    Frame = 0,
+    Position = 1
 };
 
-struct PixelData {
-    const uint8_t* data;  // Contiguous pixel data (no padding)
+struct MsgHeader {
+    MsgType type;
+    uint32_t size;
+};
+
+struct Position {
+    double x;
+    double y;
+    double z;
+    double qw;
+    double qx;
+    double qy;
+    double qz;
+};
+
+struct Frame {
+    const uint8_t* data;
     uint32_t width;
     uint32_t height;
     uint32_t eye;
@@ -23,13 +39,13 @@ public:
     SocketManager();
     ~SocketManager();
     Init();
-    std::optional<PositionDTO> GetNextPosition();
-    bool SendFrame(const PixelData& pixels);
+    std::optional<Position> GetNextPosition();
+    bool SendFrame(const Frame& frame);
 
 private:
     void SocketManager::Receive(std::stop_token st);
 
-    std::vector<PositionDTO> pos;
+    std::vector<Position> pos;
     SOCKET listenSocket;
     SOCKET clientSocket;
 
