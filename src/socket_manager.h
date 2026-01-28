@@ -24,8 +24,7 @@ public:
     ~SocketManager();
     Init();
     std::optional<PositionDTO> GetNextPosition();
-    void SendFrameData(ID3D11Texture2D* pTexture, uint32_t eye, const vr::VRTextureBounds_t& bounds);
-    bool SendPixels(const PixelData& pixels);
+    bool SendFrame(const PixelData& pixels);
 
 private:
     void SocketManager::Receive(std::stop_token st);
@@ -36,4 +35,5 @@ private:
 
     std::jthread receiverThread;
     std::mutex mtx;
+    std::mutex sendMtx;
 };

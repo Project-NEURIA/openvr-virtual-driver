@@ -428,7 +428,7 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 
         // Send pixels via socket manager
         PixelData pixels { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
-        m_socketManager.SendPixels(pixels);
+        m_socketManager.SendFrame(pixels);
     }
 }
 
