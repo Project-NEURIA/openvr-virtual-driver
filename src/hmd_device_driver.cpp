@@ -3,21 +3,18 @@
 #include <cmath>
 #include <chrono>
 #include <fstream>
+#include <algorithm>
 
 #pragma comment(lib, "ws2_32.lib")
-
-constexpr const char* TCP_HOST = "127.0.0.1";
-constexpr uint16_t TCP_PORT = 8080;
 
 Driver::Driver()
 {
     InitD3D11();
-    InitTCP();
+    m_socketManager.Init();
 }
 
 Driver::~Driver()
 {
-    CleanupTCP();
     CleanupD3D11();
 }
 
@@ -345,24 +342,7 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 {
     m_frameCount++;
 
-    if (m_frameCount % 100 == 1)
-    {
-        char buf[512];
-        snprintf(buf, sizeof(buf), "Present frame %llu, bounds[0]=(%.3f,%.3f)-(%.3f,%.3f), bounds[1]=(%.3f,%.3f)-(%.3f,%.3f)",
-            m_frameCount.load(),
-            s_lastSubmittedBounds[0].uMin, s_lastSubmittedBounds[0].vMin,
-            s_lastSubmittedBounds[0].uMax, s_lastSubmittedBounds[0].vMax,
-            s_lastSubmittedBounds[1].uMin, s_lastSubmittedBounds[1].vMin,
-            s_lastSubmittedBounds[1].uMax, s_lastSubmittedBounds[1].vMax);
-        DebugLog(buf);
-    }
-
-    if (!m_tcpConnected)
-    {
-        InitTCP();
-    }
-
-    if (!m_tcpConnected || !m_pD3DDevice)
+    if (!m_pD3DDevice)
         return;
 
     // Open and send textures for both eyes
@@ -378,17 +358,77 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
             __uuidof(ID3D11Texture2D),
             reinterpret_cast<void**>(pTexture.GetAddressOf()));
 
-        if (m_frameCount % 100 == 1)
+        if (FAILED(hr) || !pTexture)
+            continue;
+
+        // Get texture description
+        D3D11_TEXTURE2D_DESC desc;
+        pTexture->GetDesc(&desc);
+
+        // Create or recreate staging texture if needed
+        if (!m_pStagingTexture || m_stagingWidth != desc.Width || m_stagingHeight != desc.Height || m_stagingFormat != desc.Format)
         {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "  Eye %d: OpenSharedResource hr=0x%08X, pTexture=%p", eye, hr, pTexture.Get());
-            DebugLog(buf);
+            m_pStagingTexture.Reset();
+
+            D3D11_TEXTURE2D_DESC stagingDesc = {};
+            stagingDesc.Width = desc.Width;
+            stagingDesc.Height = desc.Height;
+            stagingDesc.MipLevels = 1;
+            stagingDesc.ArraySize = 1;
+            if (desc.Format == DXGI_FORMAT_R10G10B10A2_TYPELESS)
+                stagingDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+            else if (desc.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS)
+                stagingDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            else
+                stagingDesc.Format = desc.Format;
+            stagingDesc.SampleDesc.Count = 1;
+            stagingDesc.Usage = D3D11_USAGE_STAGING;
+            stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+            if (FAILED(m_pD3DDevice->CreateTexture2D(&stagingDesc, nullptr, &m_pStagingTexture)))
+                continue;
+
+            m_stagingWidth = desc.Width;
+            m_stagingHeight = desc.Height;
+            m_stagingFormat = desc.Format;
         }
 
-        if (SUCCEEDED(hr) && pTexture)
+        // Copy texture to staging
+        m_pD3DContext->CopyResource(m_pStagingTexture.Get(), pTexture.Get());
+
+        // Map staging texture
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        if (FAILED(m_pD3DContext->Map(m_pStagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mapped)))
+            continue;
+
+        // Calculate cropped region from bounds
+        const auto& bounds = s_lastSubmittedBounds[eye];
+        uint32_t cropX = static_cast<uint32_t>(bounds.uMin * m_stagingWidth);
+        uint32_t cropY = static_cast<uint32_t>(bounds.vMin * m_stagingHeight);
+        uint32_t cropW = static_cast<uint32_t>((bounds.uMax - bounds.uMin) * m_stagingWidth);
+        uint32_t cropH = static_cast<uint32_t>((bounds.vMax - bounds.vMin) * m_stagingHeight);
+
+        if (cropW == 0) cropW = m_stagingWidth;
+        if (cropH == 0) cropH = m_stagingHeight;
+        if (cropX + cropW > m_stagingWidth) cropW = m_stagingWidth - cropX;
+        if (cropY + cropH > m_stagingHeight) cropH = m_stagingHeight - cropY;
+
+        // Copy cropped pixels into contiguous buffer
+        uint8_t* srcData = static_cast<uint8_t*>(mapped.pData);
+        std::vector<uint8_t> buffer(cropW * cropH * 4);
+
+        for (uint32_t y = 0; y < cropH; y++)
         {
-            SendFrameData(pTexture.Get(), eye, s_lastSubmittedBounds[eye]);
+            const uint8_t* srcRow = srcData + (cropY + y) * mapped.RowPitch + cropX * 4;
+            uint8_t* dstRow = buffer.data() + y * cropW * 4;
+            std::copy(srcRow, srcRow + cropW * 4, dstRow);
         }
+
+        m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
+
+        // Send pixels via socket manager
+        PixelData pixels { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
+        m_socketManager.SendPixels(pixels);
     }
 }
 

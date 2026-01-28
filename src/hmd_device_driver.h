@@ -9,6 +9,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include "socket_manager.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -86,10 +87,8 @@ private:
     };
     std::vector<SwapTextureSetData> m_swapTextureSets;
 
-    // TCP
-    SOCKET m_socket = INVALID_SOCKET;
-    std::atomic<bool> m_tcpConnected{false};
-    std::mutex m_socketMutex;
+    // Networking
+    SocketManager m_socketManager;
 
     // Frame counter
     std::atomic<uint64_t> m_frameCount{0};
