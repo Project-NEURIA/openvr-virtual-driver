@@ -9,10 +9,14 @@ SocketManager::SocketManager() :
 
 SocketManager::~SocketManager()
 {
+    // Stop threads (jthread destructor requests stop automatically, but we close sockets to unblock)
     closesocket(clientSocket);
     closesocket(listenSocket);
+
+    // Threads will stop when sockets close and recv/accept return errors
+    // jthread destructor will join automatically
+
     WSACleanup();
-    return 0;
 }
 
 std::expected<int, std::string> SocketManager::Init()

@@ -429,9 +429,9 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 
         m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
 
-        // Send pixels via socket manager
-        Frame pixels { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
-        m_socketManager.SendFrame(pixels);
+        // Send frame via socket manager
+        Frame frame { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
+        m_socketManager.SendFrame(frame);
     }
 }
 

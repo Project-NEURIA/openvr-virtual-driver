@@ -1,6 +1,10 @@
 #include <vector>
 #include <optional>
 #include <expected>
+#include <string>
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <winsock2.h>
