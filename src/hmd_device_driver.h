@@ -12,13 +12,13 @@
 
 using Microsoft::WRL::ComPtr;
 
-class AIVRHmdDriver : public vr::ITrackedDeviceServerDriver,
-                      public vr::IVRDisplayComponent,
-                      public vr::IVRDriverDirectModeComponent
+class Driver : public vr::ITrackedDeviceServerDriver,
+               public vr::IVRDisplayComponent,
+               public vr::IVRDriverDirectModeComponent
 {
 public:
-    AIVRHmdDriver();
-    ~AIVRHmdDriver();
+    Driver();
+    ~Driver();
 
     // ITrackedDeviceServerDriver interface
     vr::EVRInitError Activate(uint32_t unObjectId) override;
@@ -56,16 +56,13 @@ public:
 private:
     bool InitD3D11();
     void CleanupD3D11();
-    bool InitTCP();
-    void CleanupTCP();
-    void SendFrameData(ID3D11Texture2D* pTexture, uint32_t eye, const vr::VRTextureBounds_t& bounds);
 
     uint32_t m_unObjectId = vr::k_unTrackedDeviceIndexInvalid;
-    std::string m_serialNumber = "AIVR-HMD-001";
+    std::string m_serialNumber = "OVD-HMD-001";
 
     // Display properties
-    int32_t m_renderWidth = 1920;
-    int32_t m_renderHeight = 1080;
+    int32_t m_renderWidth    = 1920;
+    int32_t m_renderHeight   = 1080;
     float m_displayFrequency = 90.0f;
     float m_ipd = 0.063f; // 63mm
 

@@ -1,6 +1,6 @@
 # Build
 build/
-ai_vr/bin/
+openvr_virtual_driver/bin/
 
 # Logs
 *.log

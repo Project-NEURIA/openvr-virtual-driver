@@ -1,5 +1,5 @@
 {
-    "ai_vr": {
+    "openvr_virtual_driver": {
         "renderWidth": 1920,
         "renderHeight": 1080,
         "displayFrequency": 90

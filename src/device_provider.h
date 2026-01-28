@@ -7,7 +7,6 @@
 class AIVRDeviceProvider : public vr::IServerTrackedDeviceProvider
 {
 public:
-    // IServerTrackedDeviceProvider interface
     vr::EVRInitError Init(vr::IVRDriverContext* pDriverContext) override;
     void Cleanup() override;
     const char* const* GetInterfaceVersions() override;
@@ -17,5 +16,5 @@ public:
     void LeaveStandby() override;
 
 private:
-    std::unique_ptr<AIVRHmdDriver> m_pHmd;
+    std::unique_ptr<Driver> m_pHmd;
 };

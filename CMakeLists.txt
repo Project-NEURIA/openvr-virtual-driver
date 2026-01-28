@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ai_vr_driver)
+project(openvr_virtual_driver)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,7 +9,7 @@ set(OPENVR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/openvr)
 set(OPENVR_INCLUDE_DIR ${OPENVR_DIR}/headers)
 
 # Driver output name
-set(DRIVER_NAME "ai_vr")
+set(DRIVER_NAME "openvr_virtual_driver")
 
 # Source files
 add_library(driver_${DRIVER_NAME} SHARED
@@ -34,10 +34,10 @@ if(WIN32)
 
     # Output to driver folder structure
     set_target_properties(driver_${DRIVER_NAME} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/ai_vr/bin/win64"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/ai_vr/bin/win64"
-        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/ai_vr/bin/win64"
-        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/ai_vr/bin/win64"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/ai_vopenvr_virtual_driver/bin/win64"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/win64"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/win64"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/win64"
     )
 endif()
 

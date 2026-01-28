@@ -1,6 +1,6 @@
 {
     "alwaysActivate": true,
-    "name": "ai_vr",
+    "name": "openvr_virtual_driver",
     "directory": "",
     "resourceOnly": false,
     "hmd_presence": ["*.*"]

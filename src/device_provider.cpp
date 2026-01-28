@@ -5,7 +5,7 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
 {
     VR_INIT_SERVER_DRIVER_CONTEXT(pDriverContext);
 
-    m_pHmd = std::make_unique<AIVRHmdDriver>();
+    m_pHmd = std::make_unique<Driver>();
 
     if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
             m_pHmd->GetSerialNumber(),
