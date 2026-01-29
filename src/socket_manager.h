@@ -1,3 +1,5 @@
+#pragma once
+
 #include <vector>
 #include <optional>
 #include <expected>
@@ -12,7 +14,8 @@
 
 enum class MsgType : uint32_t {
     Frame = 0,
-    Position = 1
+    Position = 1,
+    Controller = 2
 };
 
 struct MsgHeader {
@@ -37,6 +40,34 @@ struct Frame {
     uint32_t eye;
 };
 
+#pragma pack(push, 1)
+struct ControllerInput {
+    // Joystick
+    float joystickX;
+    float joystickY;
+    uint8_t joystickClick;
+    uint8_t joystickTouch;
+    // Trigger
+    float trigger;
+    uint8_t triggerClick;
+    uint8_t triggerTouch;
+    // Grip
+    float grip;
+    uint8_t gripClick;
+    uint8_t gripTouch;
+    // Buttons
+    uint8_t aClick;
+    uint8_t aTouch;
+    uint8_t bClick;
+    uint8_t bTouch;
+    uint8_t systemClick;
+    uint8_t menuClick;
+    // Right controller rotation (radians)
+    float rightYaw;
+    float rightPitch;
+};
+#pragma pack(pop)
+
 
 class SocketManager 
 {
@@ -45,6 +76,7 @@ public:
     ~SocketManager();
     std::expected<int, std::string> Init();
     std::optional<Position> GetNextPosition();
+    std::optional<ControllerInput> GetNextControllerInput();
     bool SendFrame(const Frame& frame);
 
 private:
@@ -52,6 +84,7 @@ private:
     void Receive(std::stop_token st);
 
     std::vector<Position> pos;
+    std::vector<ControllerInput> controllerInputs;
     SOCKET listenSocket;
     SOCKET clientSocket;
 

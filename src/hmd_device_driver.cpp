@@ -468,3 +468,8 @@ void Driver::ProcessEvent(const vr::VREvent_t& event)
 {
     // Handle events if needed
 }
+
+std::optional<ControllerInput> Driver::GetNextControllerInput()
+{
+    return m_socketManager.GetNextControllerInput();
+}

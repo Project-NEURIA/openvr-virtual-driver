@@ -98,13 +98,24 @@ void SocketManager::Receive(std::stop_token st)
             pos.push_back(position);
             lock.unlock();
         }
+        else if (msgHeader.type == MsgType::Controller && msgHeader.size == sizeof(ControllerInput))
+        {
+            ControllerInput input;
+            bytes = recv(clientSocket, reinterpret_cast<char*>(&input), sizeof(ControllerInput), MSG_WAITALL);
+            if (bytes <= 0)
+                break;  // Connection lost
+
+            std::unique_lock lock(mtx);
+            controllerInputs.push_back(input);
+            lock.unlock();
+        }
     }
 }
 
 std::optional<Position> SocketManager::GetNextPosition()
 {
     std::unique_lock lock(mtx);
-    if (pos.empty()) 
+    if (pos.empty())
     {
         return std::nullopt;
     }
@@ -114,6 +125,21 @@ std::optional<Position> SocketManager::GetNextPosition()
     lock.unlock();
 
     return p;
+}
+
+std::optional<ControllerInput> SocketManager::GetNextControllerInput()
+{
+    std::unique_lock lock(mtx);
+    if (controllerInputs.empty())
+    {
+        return std::nullopt;
+    }
+
+    ControllerInput input = controllerInputs.front();
+    controllerInputs.erase(controllerInputs.begin());
+    lock.unlock();
+
+    return input;
 }
 
 bool SocketManager::SendFrame(const Frame& frame)

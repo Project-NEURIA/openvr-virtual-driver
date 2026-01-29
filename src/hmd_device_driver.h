@@ -53,6 +53,7 @@ public:
     const char* GetSerialNumber() const { return m_serialNumber.c_str(); }
     void RunFrame();
     void ProcessEvent(const vr::VREvent_t& event);
+    std::optional<ControllerInput> GetNextControllerInput();
 
 private:
     bool InitD3D11();

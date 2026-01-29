@@ -3,6 +3,7 @@
 #include <openvr_driver.h>
 #include <memory>
 #include "hmd_device_driver.h"
+#include "controller_device_driver.h"
 
 class AIVRDeviceProvider : public vr::IServerTrackedDeviceProvider
 {
@@ -17,4 +18,6 @@ public:
 
 private:
     std::unique_ptr<Driver> m_pHmd;
+    std::unique_ptr<ControllerDriver> m_pLeftController;
+    std::unique_ptr<ControllerDriver> m_pRightController;
 };

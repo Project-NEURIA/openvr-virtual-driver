@@ -9,17 +9,25 @@ import pygame
 # MsgHeader (8 bytes): type (u32) | size (u32)
 # Frame (type=0): width (u32) | height (u32) | eye (u32) | pixels (width * height * 4 bytes)
 # Position (type=1): x, y, z, qw, qx, qy, qz (7 doubles = 56 bytes)
+# Controller (type=2): joystick_x, joystick_y (floats), joystick_click, joystick_touch,
+#                      trigger (float), trigger_click, trigger_touch,
+#                      grip (float), grip_click, grip_touch,
+#                      a_click, a_touch, b_click, b_touch, system_click, menu_click (all uint8),
+#                      right_yaw, right_pitch (floats)
 
 MSG_HEADER_SIZE = 8
 FRAME_INFO_SIZE = 12
 MSG_TYPE_FRAME = 0
 MSG_TYPE_POSITION = 1
+MSG_TYPE_CONTROLLER = 2
 
 HOST = "127.0.0.1"
 PORT = 21213
 
 # Mouse sensitivity
 SENSITIVITY = 0.002
+# Movement speed (meters per frame)
+MOVE_SPEED = 0.05
 
 
 def receive_exact(sock: socket.socket, size: int) -> bytes:
@@ -38,6 +46,24 @@ def send_position(sock: socket.socket, x: float, y: float, z: float, qw: float, 
     position_data = struct.pack("<7d", x, y, z, qw, qx, qy, qz)
     header = struct.pack("<II", MSG_TYPE_POSITION, len(position_data))
     sock.sendall(header + position_data)
+
+
+def send_controller(sock: socket.socket,
+                    joystick_x: float, joystick_y: float, joystick_click: bool, joystick_touch: bool,
+                    trigger: float, trigger_click: bool, trigger_touch: bool,
+                    grip: float, grip_click: bool, grip_touch: bool,
+                    a_click: bool, a_touch: bool, b_click: bool, b_touch: bool,
+                    system_click: bool, menu_click: bool,
+                    right_yaw: float, right_pitch: float):
+    """Send a controller input message."""
+    controller_data = struct.pack("<ff BB f BB f BB BBBBBB ff",
+        joystick_x, joystick_y, joystick_click, joystick_touch,
+        trigger, trigger_click, trigger_touch,
+        grip, grip_click, grip_touch,
+        a_click, a_touch, b_click, b_touch, system_click, menu_click,
+        right_yaw, right_pitch)
+    header = struct.pack("<II", MSG_TYPE_CONTROLLER, len(controller_data))
+    sock.sendall(header + controller_data)
 
 
 def euler_to_quaternion(yaw: float, pitch: float):
@@ -68,17 +94,23 @@ def main():
 
     # Initialize pygame
     pygame.init()
-    screen = pygame.display.set_mode((1920, 1080), pygame.RESIZABLE)
+    screen = pygame.display.set_mode((960, 540), pygame.RESIZABLE)
     pygame.display.set_caption("VR View")
 
     # Enable relative mouse mode for infinite movement
     pygame.mouse.set_relative_mode(True)
 
-    print("Mouse captured. Move mouse to look around. Press ESC to quit.")
+    print("Mouse captured. Move mouse to look around. WASD to move.")
+    print("1=Trigger, 2=Grip, 3=A, 4=B, 5=Joystick click, 6=Menu.")
+    print("Arrow keys = aim right controller. ESC to quit.")
 
     # Position and rotation
-    pos_x, pos_y, pos_z = 0.0, 1.6, 0.0
+    pos_x, pos_y, pos_z = 0.0, 1.7, 0.0
     yaw, pitch = 0.0, 0.0
+
+    # Right controller rotation
+    right_yaw, right_pitch = 0.0, 0.0
+    CONTROLLER_SENSITIVITY = 0.05
 
     running = True
     try:
@@ -106,6 +138,73 @@ def main():
                         send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
 
                         print(f"Rotation: yaw={math.degrees(yaw):.1f}° pitch={math.degrees(pitch):.1f}°")
+
+            # Handle WASD movement
+            keys = pygame.key.get_pressed()
+            move_x, move_z = 0.0, 0.0
+
+            if keys[pygame.K_w]:
+                move_z += 1.0
+            if keys[pygame.K_s]:
+                move_z -= 1.0
+            if keys[pygame.K_a]:
+                move_x -= 1.0
+            if keys[pygame.K_d]:
+                move_x += 1.0
+
+            if move_x != 0.0 or move_z != 0.0:
+                # Normalize diagonal movement
+                length = math.sqrt(move_x * move_x + move_z * move_z)
+                move_x /= length
+                move_z /= length
+
+                # Rotate movement by yaw (move relative to look direction)
+                cos_yaw = math.cos(yaw)
+                sin_yaw = math.sin(yaw)
+                world_x = move_x * cos_yaw - move_z * sin_yaw
+                world_z = move_x * sin_yaw + move_z * cos_yaw
+
+                pos_x += world_x * MOVE_SPEED
+                pos_z -= world_z * MOVE_SPEED
+
+                # Send updated position
+                qw, qx, qy, qz = euler_to_quaternion(yaw, pitch)
+                send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
+
+            # Handle controller inputs
+            # Key mappings:
+            # 1 - Trigger, 2 - Grip
+            # 3 - A button, 4 - B button
+            # 5 - Joystick click, 6 - Menu
+            # Arrow keys - right controller aim
+            trigger = 1.0 if keys[pygame.K_1] else 0.0
+            grip = 1.0 if keys[pygame.K_2] else 0.0
+            a_click = keys[pygame.K_3]
+            b_click = keys[pygame.K_4]
+            joystick_click = keys[pygame.K_5]
+            menu_click = keys[pygame.K_6]
+
+            # Arrow keys for right controller rotation
+            if keys[pygame.K_LEFT]:
+                right_yaw += CONTROLLER_SENSITIVITY
+            if keys[pygame.K_RIGHT]:
+                right_yaw -= CONTROLLER_SENSITIVITY
+            if keys[pygame.K_UP]:
+                right_pitch += CONTROLLER_SENSITIVITY
+            if keys[pygame.K_DOWN]:
+                right_pitch -= CONTROLLER_SENSITIVITY
+
+            # Clamp pitch
+            right_pitch = max(-math.pi / 2, min(math.pi / 2, right_pitch))
+
+            send_controller(conn,
+                joystick_x=0.0, joystick_y=0.0, joystick_click=joystick_click, joystick_touch=False,
+                trigger=trigger, trigger_click=(trigger > 0.9), trigger_touch=(trigger > 0.0),
+                grip=grip, grip_click=(grip > 0.9), grip_touch=(grip > 0.0),
+                a_click=a_click, a_touch=a_click,
+                b_click=b_click, b_touch=b_click,
+                system_click=False, menu_click=menu_click,
+                right_yaw=right_yaw, right_pitch=right_pitch)
 
             # Read message header
             msg_header = receive_exact(conn, MSG_HEADER_SIZE)
