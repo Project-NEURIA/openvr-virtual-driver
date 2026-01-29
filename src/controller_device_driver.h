@@ -24,6 +24,7 @@ public:
     // Public methods
     const char* GetSerialNumber() const { return m_serialNumber.c_str(); }
     void UpdateInput(const struct ControllerInput& input);
+    void UpdateHandPose(const struct Pose& pose);
     void RunFrame();
 
 private:
@@ -59,6 +60,11 @@ private:
     // Input state
     ControllerInput m_inputState{};
     std::mutex m_inputMutex;
+
+    // Hand pose from BodyPose
+    Pose m_handPose{};
+    std::atomic<bool> m_hasBodyPose{false};
+    std::mutex m_handPoseMutex;
 
     // Thread
     std::atomic<bool> m_isActive{false};

@@ -473,3 +473,8 @@ std::optional<ControllerInput> Driver::GetNextControllerInput()
 {
     return m_socketManager.GetNextControllerInput();
 }
+
+std::optional<BodyPose> Driver::GetNextBodyPose()
+{
+    return m_socketManager.GetNextBodyPose();
+}

@@ -105,59 +105,87 @@ vr::DriverPose_t ControllerDriver::GetPose()
     pose.qWorldFromDriverRotation.w = 1.0;
     pose.qDriverFromHeadRotation.w = 1.0;
 
-    // Get HMD pose to position controller relative to it
-    vr::TrackedDevicePose_t hmdPose{};
-    vr::VRServerDriverHost()->GetRawTrackedDevicePoses(0.f, &hmdPose, 1);
-
-    if (hmdPose.bPoseIsValid)
+    // Check if we have a body pose for this controller
+    if (m_hasBodyPose)
     {
-        // Extract HMD position from matrix
-        float hmdX = hmdPose.mDeviceToAbsoluteTracking.m[0][3];
-        float hmdY = hmdPose.mDeviceToAbsoluteTracking.m[1][3];
-        float hmdZ = hmdPose.mDeviceToAbsoluteTracking.m[2][3];
-
-        // Offset controller position based on hand
-        float xOffset = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.3f : 0.3f;
-
-        pose.vecPosition[0] = hmdX + xOffset;
-        pose.vecPosition[1] = hmdY - 0.3f;
-        pose.vecPosition[2] = hmdZ - 0.4f;
-    }
-    else
-    {
-        // Default position if HMD pose not available
-        float xOffset = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.3f : 0.3f;
-        pose.vecPosition[0] = xOffset;
-        pose.vecPosition[1] = 1.0;
-        pose.vecPosition[2] = -0.4f;
-    }
-
-    // Apply rotation for right controller
-    if (m_role == vr::TrackedControllerRole_RightHand)
-    {
-        ControllerInput input;
+        Pose handPose;
         {
-            std::lock_guard<std::mutex> lock(m_inputMutex);
-            input = m_inputState;
+            std::lock_guard<std::mutex> lock(m_handPoseMutex);
+            handPose = m_handPose;
         }
 
-        // Convert yaw/pitch to quaternion
-        float yaw = input.rightYaw;
-        float pitch = input.rightPitch;
+        pose.vecPosition[0] = handPose.posX;
+        pose.vecPosition[1] = handPose.posY;
+        pose.vecPosition[2] = handPose.posZ;
 
-        float cy = std::cos(yaw * 0.5f);
-        float sy = std::sin(yaw * 0.5f);
-        float cp = std::cos(pitch * 0.5f);
-        float sp = std::sin(pitch * 0.5f);
+        pose.qRotation.w = handPose.rotW;
+        pose.qRotation.x = handPose.rotX;
+        pose.qRotation.y = handPose.rotY;
+        pose.qRotation.z = handPose.rotZ;
 
-        pose.qRotation.w = cp * cy;
-        pose.qRotation.x = sp * cy;
-        pose.qRotation.y = cp * sy;
-        pose.qRotation.z = -sp * sy;
+        // Default rotation if not set
+        if (pose.qRotation.w == 0.0 && pose.qRotation.x == 0.0 &&
+            pose.qRotation.y == 0.0 && pose.qRotation.z == 0.0)
+        {
+            pose.qRotation.w = 1.0;
+        }
     }
     else
     {
-        pose.qRotation.w = 1.0;
+        // Fallback: derive position from HMD pose
+        vr::TrackedDevicePose_t hmdPose{};
+        vr::VRServerDriverHost()->GetRawTrackedDevicePoses(0.f, &hmdPose, 1);
+
+        if (hmdPose.bPoseIsValid)
+        {
+            // Extract HMD position from matrix
+            float hmdX = hmdPose.mDeviceToAbsoluteTracking.m[0][3];
+            float hmdY = hmdPose.mDeviceToAbsoluteTracking.m[1][3];
+            float hmdZ = hmdPose.mDeviceToAbsoluteTracking.m[2][3];
+
+            // Offset controller position based on hand
+            float xOffset = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.3f : 0.3f;
+
+            pose.vecPosition[0] = hmdX + xOffset;
+            pose.vecPosition[1] = hmdY - 0.3f;
+            pose.vecPosition[2] = hmdZ - 0.4f;
+        }
+        else
+        {
+            // Default position if HMD pose not available
+            float xOffset = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.3f : 0.3f;
+            pose.vecPosition[0] = xOffset;
+            pose.vecPosition[1] = 1.0;
+            pose.vecPosition[2] = -0.4f;
+        }
+
+        // Apply rotation for right controller from input
+        if (m_role == vr::TrackedControllerRole_RightHand)
+        {
+            ControllerInput input;
+            {
+                std::lock_guard<std::mutex> lock(m_inputMutex);
+                input = m_inputState;
+            }
+
+            // Convert yaw/pitch to quaternion
+            float yaw = input.rightYaw;
+            float pitch = input.rightPitch;
+
+            float cy = std::cos(yaw * 0.5f);
+            float sy = std::sin(yaw * 0.5f);
+            float cp = std::cos(pitch * 0.5f);
+            float sp = std::sin(pitch * 0.5f);
+
+            pose.qRotation.w = cp * cy;
+            pose.qRotation.x = sp * cy;
+            pose.qRotation.y = cp * sy;
+            pose.qRotation.z = -sp * sy;
+        }
+        else
+        {
+            pose.qRotation.w = 1.0;
+        }
     }
 
     pose.poseIsValid = true;
@@ -171,6 +199,13 @@ void ControllerDriver::UpdateInput(const ControllerInput& input)
 {
     std::lock_guard<std::mutex> lock(m_inputMutex);
     m_inputState = input;
+}
+
+void ControllerDriver::UpdateHandPose(const Pose& pose)
+{
+    std::lock_guard<std::mutex> lock(m_handPoseMutex);
+    m_handPose = pose;
+    m_hasBodyPose = true;
 }
 
 void ControllerDriver::RunFrame()

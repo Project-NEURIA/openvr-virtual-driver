@@ -1,8 +1,12 @@
 import socket
 import struct
 import math
+import time
+import os
 import numpy as np
 import pygame
+
+from vmd_parser import VMDPlayer
 
 
 # Protocol:
@@ -20,6 +24,12 @@ FRAME_INFO_SIZE = 12
 MSG_TYPE_FRAME = 0
 MSG_TYPE_POSITION = 1
 MSG_TYPE_CONTROLLER = 2
+MSG_TYPE_BODY_POSE = 3
+
+# Pose struct: posX, posY, posZ, rotW, rotX, rotY, rotZ (7 floats = 28 bytes)
+POSE_SIZE = 28
+# BodyPose: 12 poses (leftHand, rightHand, waist, chest, leftFoot, rightFoot, leftKnee, rightKnee, leftElbow, rightElbow, leftShoulder, rightShoulder)
+BODY_POSE_SIZE = POSE_SIZE * 12
 
 HOST = "127.0.0.1"
 PORT = 21213
@@ -66,6 +76,35 @@ def send_controller(sock: socket.socket,
     sock.sendall(header + controller_data)
 
 
+def pack_pose(pos_x: float, pos_y: float, pos_z: float, rot_w: float, rot_x: float, rot_y: float, rot_z: float) -> bytes:
+    """Pack a single pose (position + quaternion rotation) into bytes."""
+    return struct.pack("<7f", pos_x, pos_y, pos_z, rot_w, rot_x, rot_y, rot_z)
+
+
+def send_body_pose(sock: socket.socket, body_pose: dict):
+    """Send a body pose message.
+
+    body_pose should be a dict with keys:
+    'left_hand', 'right_hand', 'waist', 'chest', 'left_foot', 'right_foot',
+    'left_knee', 'right_knee', 'left_elbow', 'right_elbow', 'left_shoulder', 'right_shoulder'
+
+    Each value should be a tuple of (pos_x, pos_y, pos_z, rot_w, rot_x, rot_y, rot_z)
+    """
+    pose_order = [
+        'left_hand', 'right_hand', 'waist', 'chest',
+        'left_foot', 'right_foot', 'left_knee', 'right_knee',
+        'left_elbow', 'right_elbow', 'left_shoulder', 'right_shoulder'
+    ]
+
+    body_data = b''
+    for pose_name in pose_order:
+        pose = body_pose.get(pose_name, (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0))
+        body_data += pack_pose(*pose)
+
+    header = struct.pack("<II", MSG_TYPE_BODY_POSE, len(body_data))
+    sock.sendall(header + body_data)
+
+
 def euler_to_quaternion(yaw: float, pitch: float):
     """Convert yaw (around Y) and pitch (around X) to quaternion for OpenVR."""
     # Quaternion for yaw (rotation around Y axis)
@@ -100,9 +139,32 @@ def main():
     # Enable relative mouse mode for infinite movement
     pygame.mouse.set_relative_mode(True)
 
+    # Load VMD file if it exists
+    vmd_player = None
+    vmd_path = os.path.join(os.path.dirname(__file__), "PV058_MIK_M2_WIM.vmd")
+    if os.path.exists(vmd_path):
+        try:
+            vmd_player = VMDPlayer(vmd_path, fps=30.0)
+            print(f"VMD loaded: {vmd_path}")
+        except Exception as e:
+            print(f"Failed to load VMD: {e}")
+
+    # Load audio file if it exists
+    audio_loaded = False
+    audio_path = os.path.join(os.path.dirname(__file__), "PV058_MIX.wav")
+    if os.path.exists(audio_path):
+        try:
+            pygame.mixer.init()
+            pygame.mixer.music.load(audio_path)
+            audio_loaded = True
+            print(f"Audio loaded: {audio_path}")
+        except Exception as e:
+            print(f"Failed to load audio: {e}")
+
     print("Mouse captured. Move mouse to look around. WASD to move.")
     print("1=Trigger, 2=Grip, 3=A, 4=B, 5=Joystick click, 6=Menu.")
     print("Arrow keys = aim right controller. ESC to quit.")
+    print("P = Play/Pause VMD, R = Reset. T-pose sent by default.")
 
     # Position and rotation
     pos_x, pos_y, pos_z = 0.0, 1.7, 0.0
@@ -112,9 +174,17 @@ def main():
     right_yaw, right_pitch = 0.0, 0.0
     CONTROLLER_SENSITIVITY = 0.05
 
+    # Animation timing
+    last_time = time.time()
+
     running = True
     try:
         while running:
+            # Calculate delta time for animation
+            current_time = time.time()
+            delta_time = current_time - last_time
+            last_time = current_time
+
             # Handle pygame events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -122,6 +192,22 @@ def main():
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         running = False
+                    elif event.key == pygame.K_p and vmd_player:
+                        playing = vmd_player.toggle()
+                        # Sync audio with VMD
+                        if audio_loaded:
+                            if playing:
+                                # Resume or start from current position
+                                pos_ms = int(vmd_player.current_frame / vmd_player.fps * 1000)
+                                pygame.mixer.music.play(start=pos_ms / 1000.0)
+                            else:
+                                pygame.mixer.music.pause()
+                        print(f"VMD {'Playing' if playing else 'Paused'} at frame {vmd_player.current_frame:.0f}")
+                    elif event.key == pygame.K_r and vmd_player:
+                        vmd_player.reset()
+                        if audio_loaded:
+                            pygame.mixer.music.stop()
+                        print("VMD Reset to frame 0")
                 elif event.type == pygame.MOUSEMOTION:
                     # Get relative mouse movement
                     dx, dy = event.rel
@@ -206,6 +292,40 @@ def main():
                 system_click=False, menu_click=menu_click,
                 right_yaw=right_yaw, right_pitch=right_pitch)
 
+            # Send body pose: VMD (playing or paused) or T-pose if no VMD
+            # base_position is ground level XZ, skeleton has its own heights
+            if vmd_player and vmd_player.current_frame > 0 or (vmd_player and vmd_player.playing):
+                # Advance only if playing
+                if vmd_player.playing:
+                    frames_to_advance = delta_time * vmd_player.fps
+                    vmd_player.advance_frame(frames_to_advance)
+
+                # Get head transform for HMD
+                hx, hy, hz, hw, hqx, hqy, hqz = vmd_player.get_head_transform(base_position=(pos_x, 0.0, pos_z))
+                send_position(conn, hx, hy, hz, hw, hqx, hqy, hqz)
+
+                # Get body pose for trackers (current frame, even if paused)
+                body_pose = vmd_player.get_body_pose(base_position=(pos_x, 0.0, pos_z))
+                send_body_pose(conn, body_pose)
+            else:
+                # Send T-pose by default (matching VMD player skeleton)
+                # Hip at 0.93m, chest higher, shorter upper arms
+                body_pose = {
+                    'waist': (pos_x, 0.93, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'chest': (pos_x, 1.29, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'left_shoulder': (pos_x - 0.15, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'right_shoulder': (pos_x + 0.15, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'left_elbow': (pos_x - 0.45, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'right_elbow': (pos_x + 0.45, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'left_hand': (pos_x - 0.67, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'right_hand': (pos_x + 0.67, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'left_knee': (pos_x - 0.09, 0.46, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'right_knee': (pos_x + 0.09, 0.46, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'left_foot': (pos_x - 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'right_foot': (pos_x + 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
+                }
+                send_body_pose(conn, body_pose)
+
             # Read message header
             msg_header = receive_exact(conn, MSG_HEADER_SIZE)
             msg_type, msg_size = struct.unpack("<II", msg_header)
@@ -241,6 +361,9 @@ def main():
     except KeyboardInterrupt:
         print("Interrupted")
     finally:
+        if audio_loaded:
+            pygame.mixer.music.stop()
+            pygame.mixer.quit()
         pygame.mouse.set_relative_mode(False)
         pygame.quit()
         conn.close()

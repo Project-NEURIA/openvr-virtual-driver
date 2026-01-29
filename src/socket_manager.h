@@ -15,7 +15,8 @@
 enum class MsgType : uint32_t {
     Frame = 0,
     Position = 1,
-    Controller = 2
+    Controller = 2,
+    BodyPose = 3
 };
 
 struct MsgHeader {
@@ -66,6 +67,28 @@ struct ControllerInput {
     float rightYaw;
     float rightPitch;
 };
+
+struct Pose {
+    float posX, posY, posZ;
+    float rotW, rotX, rotY, rotZ;  // quaternion
+};
+
+struct BodyPose {
+    // Controllers (hands)
+    Pose leftHand;
+    Pose rightHand;
+    // Trackers
+    Pose waist;
+    Pose chest;
+    Pose leftFoot;
+    Pose rightFoot;
+    Pose leftKnee;
+    Pose rightKnee;
+    Pose leftElbow;
+    Pose rightElbow;
+    Pose leftShoulder;
+    Pose rightShoulder;
+};
 #pragma pack(pop)
 
 
@@ -77,6 +100,7 @@ public:
     std::expected<int, std::string> Init();
     std::optional<Position> GetNextPosition();
     std::optional<ControllerInput> GetNextControllerInput();
+    std::optional<BodyPose> GetNextBodyPose();
     bool SendFrame(const Frame& frame);
 
 private:
@@ -85,6 +109,7 @@ private:
 
     std::vector<Position> pos;
     std::vector<ControllerInput> controllerInputs;
+    std::vector<BodyPose> bodyPoses;
     SOCKET listenSocket;
     SOCKET clientSocket;
 

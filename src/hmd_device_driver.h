@@ -54,6 +54,7 @@ public:
     void RunFrame();
     void ProcessEvent(const vr::VREvent_t& event);
     std::optional<ControllerInput> GetNextControllerInput();
+    std::optional<BodyPose> GetNextBodyPose();
 
 private:
     bool InitD3D11();

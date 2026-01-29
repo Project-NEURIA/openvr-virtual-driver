@@ -17,6 +17,7 @@ add_library(driver_${DRIVER_NAME} SHARED
     src/device_provider.cpp
     src/hmd_device_driver.cpp
     src/controller_device_driver.cpp
+    src/tracker_device_driver.cpp
     src/socket_manager.cpp
 )
 

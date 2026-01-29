@@ -2,8 +2,10 @@
 
 #include <openvr_driver.h>
 #include <memory>
+#include <array>
 #include "hmd_device_driver.h"
 #include "controller_device_driver.h"
+#include "tracker_device_driver.h"
 
 class AIVRDeviceProvider : public vr::IServerTrackedDeviceProvider
 {
@@ -20,4 +22,7 @@ private:
     std::unique_ptr<Driver> m_pHmd;
     std::unique_ptr<ControllerDriver> m_pLeftController;
     std::unique_ptr<ControllerDriver> m_pRightController;
+
+    // Body trackers (10 total: waist, chest, feet, knees, elbows, shoulders)
+    std::array<std::unique_ptr<TrackerDriver>, 10> m_trackers;
 };
