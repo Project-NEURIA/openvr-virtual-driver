@@ -3,9 +3,8 @@
 #include <openvr_driver.h>
 #include <string>
 #include <thread>
-#include <mutex>
-#include <atomic>
 #include "../socket/socket_manager.h"
+#include "../mpsc/channel.h"
 
 enum class TrackerRole
 {
@@ -24,7 +23,7 @@ enum class TrackerRole
 class TrackerDriver : public vr::ITrackedDeviceServerDriver
 {
 public:
-    TrackerDriver(TrackerRole role);
+    TrackerDriver(TrackerRole role, mpsc::Receiver<Pose> poseReceiver);
 
     // ITrackedDeviceServerDriver
     vr::EVRInitError Activate(uint32_t unObjectId) override;
@@ -35,15 +34,11 @@ public:
     vr::DriverPose_t GetPose() override;
 
     const char* GetSerialNumber() const { return m_serialNumber.c_str(); }
-    void UpdatePose(const Pose& pose);
 
 private:
     TrackerRole m_role;
     std::string m_serialNumber;
     uint32_t m_deviceIndex = vr::k_unTrackedDeviceIndexInvalid;
-    std::atomic<bool> m_isActive{false};
+    mpsc::Receiver<Pose> m_poseReceiver;
     std::jthread m_poseThread;
-
-    Pose m_currentPose{};
-    std::mutex m_poseMutex;
 };

@@ -20,7 +20,6 @@ static const char* GetTrackerRoleName(TrackerRole role)
 
 static const char* GetTrackerRoleHint(TrackerRole role)
 {
-    // These match the vr::TrackerRole enum values expected by SteamVR
     switch (role)
     {
         case TrackerRole::Waist: return "vive_tracker_waist";
@@ -37,8 +36,9 @@ static const char* GetTrackerRoleHint(TrackerRole role)
     }
 }
 
-TrackerDriver::TrackerDriver(TrackerRole role)
+TrackerDriver::TrackerDriver(TrackerRole role, mpsc::Receiver<Pose> poseReceiver)
     : m_role(role)
+    , m_poseReceiver(std::move(poseReceiver))
 {
     m_serialNumber = std::string("OVD-TRACKER-") + GetTrackerRoleName(role);
 }
@@ -46,11 +46,9 @@ TrackerDriver::TrackerDriver(TrackerRole role)
 vr::EVRInitError TrackerDriver::Activate(uint32_t unObjectId)
 {
     m_deviceIndex = unObjectId;
-    m_isActive = true;
 
     vr::PropertyContainerHandle_t container = vr::VRProperties()->TrackedDeviceToPropertyContainer(m_deviceIndex);
 
-    // Set tracker properties
     vr::VRProperties()->SetStringProperty(container, vr::Prop_ModelNumber_String, "OVD Tracker");
     vr::VRProperties()->SetStringProperty(container, vr::Prop_SerialNumber_String, m_serialNumber.c_str());
     vr::VRProperties()->SetStringProperty(container, vr::Prop_ControllerType_String, GetTrackerRoleHint(m_role));
@@ -58,10 +56,34 @@ vr::EVRInitError TrackerDriver::Activate(uint32_t unObjectId)
 
     // Start pose update thread
     m_poseThread = std::jthread([this](std::stop_token st) {
-        while (!st.stop_requested() && m_isActive)
+        while (!st.stop_requested())
         {
-            vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, GetPose(), sizeof(vr::DriverPose_t));
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            if (auto p = m_poseReceiver.recv())
+            {
+                vr::DriverPose_t pose = {};
+                pose.qWorldFromDriverRotation.w = 1.0;
+                pose.qDriverFromHeadRotation.w = 1.0;
+                pose.vecPosition[0] = p->posX;
+                pose.vecPosition[1] = p->posY;
+                pose.vecPosition[2] = p->posZ;
+                pose.qRotation.w = p->rotW;
+                pose.qRotation.x = p->rotX;
+                pose.qRotation.y = p->rotY;
+                pose.qRotation.z = p->rotZ;
+                if (pose.qRotation.w == 0.0 && pose.qRotation.x == 0.0 &&
+                    pose.qRotation.y == 0.0 && pose.qRotation.z == 0.0)
+                {
+                    pose.qRotation.w = 1.0;
+                }
+                pose.poseIsValid = true;
+                pose.deviceIsConnected = true;
+                pose.result = vr::TrackingResult_Running_OK;
+                vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, pose, sizeof(vr::DriverPose_t));
+            }
+            else
+            {
+                break; // Channel closed
+            }
         }
     });
 
@@ -70,7 +92,6 @@ vr::EVRInitError TrackerDriver::Activate(uint32_t unObjectId)
 
 void TrackerDriver::Deactivate()
 {
-    m_isActive = false;
     if (m_poseThread.joinable())
     {
         m_poseThread.request_stop();
@@ -96,42 +117,8 @@ void TrackerDriver::DebugRequest(const char* pchRequest, char* pchResponseBuffer
 
 vr::DriverPose_t TrackerDriver::GetPose()
 {
+    // Deprecated - poses are pushed via TrackedDevicePoseUpdated
     vr::DriverPose_t pose = {};
-
-    pose.qWorldFromDriverRotation.w = 1.0;
-    pose.qDriverFromHeadRotation.w = 1.0;
-
-    Pose currentPose;
-    {
-        std::lock_guard<std::mutex> lock(m_poseMutex);
-        currentPose = m_currentPose;
-    }
-
-    pose.vecPosition[0] = currentPose.posX;
-    pose.vecPosition[1] = currentPose.posY;
-    pose.vecPosition[2] = currentPose.posZ;
-
-    pose.qRotation.w = currentPose.rotW;
-    pose.qRotation.x = currentPose.rotX;
-    pose.qRotation.y = currentPose.rotY;
-    pose.qRotation.z = currentPose.rotZ;
-
-    // Default rotation if not set
-    if (pose.qRotation.w == 0.0 && pose.qRotation.x == 0.0 &&
-        pose.qRotation.y == 0.0 && pose.qRotation.z == 0.0)
-    {
-        pose.qRotation.w = 1.0;
-    }
-
-    pose.poseIsValid = true;
-    pose.deviceIsConnected = true;
-    pose.result = vr::TrackingResult_Running_OK;
-
+    pose.poseIsValid = false;
     return pose;
-}
-
-void TrackerDriver::UpdatePose(const Pose& pose)
-{
-    std::lock_guard<std::mutex> lock(m_poseMutex);
-    m_currentPose = pose;
 }

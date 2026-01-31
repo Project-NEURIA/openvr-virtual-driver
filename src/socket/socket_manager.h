@@ -1,6 +1,5 @@
 #pragma once
 
-#include <vector>
 #include <optional>
 #include <expected>
 #include <string>
@@ -11,6 +10,7 @@
 #include <wrl/client.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include "../mpsc/channel.h"
 
 enum class MsgType : uint32_t {
     Frame = 0,
@@ -91,31 +91,48 @@ struct BodyPose {
 };
 #pragma pack(pop)
 
+struct TrackerSenders
+{
+    mpsc::Sender<Pose> waist;
+    mpsc::Sender<Pose> chest;
+    mpsc::Sender<Pose> leftFoot;
+    mpsc::Sender<Pose> rightFoot;
+    mpsc::Sender<Pose> leftKnee;
+    mpsc::Sender<Pose> rightKnee;
+    mpsc::Sender<Pose> leftElbow;
+    mpsc::Sender<Pose> rightElbow;
+    mpsc::Sender<Pose> leftShoulder;
+    mpsc::Sender<Pose> rightShoulder;
+};
 
-class SocketManager 
+class SocketManager
 {
 public:
-    SocketManager();
+    SocketManager(
+        mpsc::Sender<Position> positionSender,
+        mpsc::Sender<ControllerInput> leftControllerSender,
+        mpsc::Sender<ControllerInput> rightControllerSender,
+        TrackerSenders trackerSenders
+    );
     ~SocketManager();
     std::expected<int, std::string> Init();
-    std::optional<Position> GetNextPosition();
-    std::optional<ControllerInput> GetNextControllerInput();
-    std::optional<BodyPose> GetNextBodyPose();
     bool SendFrame(const Frame& frame);
 
 private:
     void Connect(std::stop_token st);
     void Receive(std::stop_token st);
 
-    std::vector<Position> pos;
-    std::vector<ControllerInput> controllerInputs;
-    std::vector<BodyPose> bodyPoses;
+    // Channel senders
+    mpsc::Sender<Position> m_positionSender;
+    mpsc::Sender<ControllerInput> m_leftControllerSender;
+    mpsc::Sender<ControllerInput> m_rightControllerSender;
+    TrackerSenders m_trackerSenders;
+
     SOCKET listenSocket;
     SOCKET clientSocket;
 
     std::jthread connectionThread;
     std::jthread receiverThread;
     std::atomic<bool> connected{false};
-    std::mutex mtx;
     std::mutex sendMtx;
 };

@@ -6,6 +6,7 @@
 #include "../hmd/hmd_device_driver.h"
 #include "../controller/controller_device_driver.h"
 #include "../tracker/tracker_device_driver.h"
+#include "../socket/socket_manager.h"
 
 class AIVRDeviceProvider : public vr::IServerTrackedDeviceProvider
 {
@@ -19,10 +20,9 @@ public:
     void LeaveStandby() override;
 
 private:
+    std::unique_ptr<SocketManager> m_pSocketManager;
     std::unique_ptr<Driver> m_pHmd;
     std::unique_ptr<ControllerDriver> m_pLeftController;
     std::unique_ptr<ControllerDriver> m_pRightController;
-
-    // Body trackers (10 total: waist, chest, feet, knees, elbows, shoulders)
     std::array<std::unique_ptr<TrackerDriver>, 10> m_trackers;
 };

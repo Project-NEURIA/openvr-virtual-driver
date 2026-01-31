@@ -6,10 +6,10 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <vector>
-#include <atomic>
 #include <thread>
-#include <mutex>
+#include <atomic>
 #include "../socket/socket_manager.h"
+#include "../mpsc/channel.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -18,7 +18,7 @@ class Driver : public vr::ITrackedDeviceServerDriver,
                public vr::IVRDriverDirectModeComponent
 {
 public:
-    Driver();
+    Driver(mpsc::Receiver<Position> positionReceiver, SocketManager* socketManager);
     ~Driver();
 
     // ITrackedDeviceServerDriver interface
@@ -51,14 +51,12 @@ public:
 
     // Public methods
     const char* GetSerialNumber() const { return m_serialNumber.c_str(); }
-    void RunFrame();
     void ProcessEvent(const vr::VREvent_t& event);
-    std::optional<ControllerInput> GetNextControllerInput();
-    std::optional<BodyPose> GetNextBodyPose();
 
 private:
     bool InitD3D11();
     void CleanupD3D11();
+    void PoseUpdateThread();
 
     uint32_t m_unObjectId = vr::k_unTrackedDeviceIndexInvalid;
     std::string m_serialNumber = "OVD-HMD-001";
@@ -90,8 +88,11 @@ private:
     std::vector<SwapTextureSetData> m_swapTextureSets;
 
     // Networking
-    SocketManager m_socketManager;
-    Position m_lastPosition = { 0.0, 1.6, 0.0, 1.0, 0.0, 0.0, 0.0 };
+    SocketManager* m_pSocketManager;
+
+    // Position channel
+    mpsc::Receiver<Position> m_positionReceiver;
+    std::jthread m_poseThread;
 
     // Frame counter
     std::atomic<uint64_t> m_frameCount{0};

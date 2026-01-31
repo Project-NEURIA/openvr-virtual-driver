@@ -2,15 +2,14 @@
 
 #include <openvr_driver.h>
 #include <string>
-#include <atomic>
 #include <thread>
-#include <mutex>
 #include "../socket/socket_manager.h"
+#include "../mpsc/channel.h"
 
 class ControllerDriver : public vr::ITrackedDeviceServerDriver
 {
 public:
-    ControllerDriver(vr::ETrackedControllerRole role);
+    ControllerDriver(vr::ETrackedControllerRole role, mpsc::Receiver<ControllerInput> inputReceiver);
     ~ControllerDriver() = default;
 
     // ITrackedDeviceServerDriver interface
@@ -23,13 +22,8 @@ public:
 
     // Public methods
     const char* GetSerialNumber() const { return m_serialNumber.c_str(); }
-    void UpdateInput(const struct ControllerInput& input);
-    void UpdateHandPose(const struct Pose& pose);
-    void RunFrame();
 
 private:
-    void PoseUpdateThread();
-
     uint32_t m_deviceIndex = vr::k_unTrackedDeviceIndexInvalid;
     vr::ETrackedControllerRole m_role;
     std::string m_serialNumber;
@@ -57,16 +51,7 @@ private:
     // Haptic
     vr::VRInputComponentHandle_t m_hapticHandle = vr::k_ulInvalidInputComponentHandle;
 
-    // Input state
-    ControllerInput m_inputState{};
-    std::mutex m_inputMutex;
-
-    // Hand pose from BodyPose
-    Pose m_handPose{};
-    std::atomic<bool> m_hasBodyPose{false};
-    std::mutex m_handPoseMutex;
-
-    // Thread
-    std::atomic<bool> m_isActive{false};
-    std::jthread m_poseThread;
+    // Input channel
+    mpsc::Receiver<ControllerInput> m_inputReceiver;
+    std::jthread m_inputThread;
 };

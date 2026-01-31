@@ -1,13 +1,53 @@
 #include "device_provider.h"
-#include "hmd_device_driver.h"
-#include "controller_device_driver.h"
-#include "tracker_device_driver.h"
+#include "../hmd/hmd_device_driver.h"
+#include "../controller/controller_device_driver.h"
+#include "../tracker/tracker_device_driver.h"
+#include "../mpsc/channel.h"
 
 vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
 {
     VR_INIT_SERVER_DRIVER_CONTEXT(pDriverContext);
 
-    m_pHmd = std::make_unique<Driver>();
+    // Create channels for position (HMD)
+    auto [positionSender, positionReceiver] = mpsc::channel<Position>();
+
+    // Create channels for controllers
+    auto [leftControllerSender, leftControllerReceiver] = mpsc::channel<ControllerInput>();
+    auto [rightControllerSender, rightControllerReceiver] = mpsc::channel<ControllerInput>();
+
+    // Create channels for trackers
+    auto [waistTx, waistRx] = mpsc::channel<Pose>();
+    auto [chestTx, chestRx] = mpsc::channel<Pose>();
+    auto [leftFootTx, leftFootRx] = mpsc::channel<Pose>();
+    auto [rightFootTx, rightFootRx] = mpsc::channel<Pose>();
+    auto [leftKneeTx, leftKneeRx] = mpsc::channel<Pose>();
+    auto [rightKneeTx, rightKneeRx] = mpsc::channel<Pose>();
+    auto [leftElbowTx, leftElbowRx] = mpsc::channel<Pose>();
+    auto [rightElbowTx, rightElbowRx] = mpsc::channel<Pose>();
+    auto [leftShoulderTx, leftShoulderRx] = mpsc::channel<Pose>();
+    auto [rightShoulderTx, rightShoulderRx] = mpsc::channel<Pose>();
+
+    // Create socket manager with all senders
+    m_pSocketManager = std::make_unique<SocketManager>(
+        std::move(positionSender),
+        std::move(leftControllerSender),
+        std::move(rightControllerSender),
+        TrackerSenders{
+            std::move(waistTx),
+            std::move(chestTx),
+            std::move(leftFootTx),
+            std::move(rightFootTx),
+            std::move(leftKneeTx),
+            std::move(rightKneeTx),
+            std::move(leftElbowTx),
+            std::move(rightElbowTx),
+            std::move(leftShoulderTx),
+            std::move(rightShoulderTx)
+        }
+    );
+
+    // Create HMD with position receiver
+    m_pHmd = std::make_unique<Driver>(std::move(positionReceiver), m_pSocketManager.get());
 
     if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
             m_pHmd->GetSerialNumber(),
@@ -18,7 +58,10 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
     }
 
     // Add left controller
-    m_pLeftController = std::make_unique<ControllerDriver>(vr::TrackedControllerRole_LeftHand);
+    m_pLeftController = std::make_unique<ControllerDriver>(
+        vr::TrackedControllerRole_LeftHand,
+        std::move(leftControllerReceiver)
+    );
     if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
             m_pLeftController->GetSerialNumber(),
             vr::TrackedDeviceClass_Controller,
@@ -28,7 +71,10 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
     }
 
     // Add right controller
-    m_pRightController = std::make_unique<ControllerDriver>(vr::TrackedControllerRole_RightHand);
+    m_pRightController = std::make_unique<ControllerDriver>(
+        vr::TrackedControllerRole_RightHand,
+        std::move(rightControllerReceiver)
+    );
     if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
             m_pRightController->GetSerialNumber(),
             vr::TrackedDeviceClass_Controller,
@@ -38,22 +84,26 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
     }
 
     // Add body trackers
-    const TrackerRole trackerRoles[] = {
-        TrackerRole::Waist,
-        TrackerRole::Chest,
-        TrackerRole::LeftFoot,
-        TrackerRole::RightFoot,
-        TrackerRole::LeftKnee,
-        TrackerRole::RightKnee,
-        TrackerRole::LeftElbow,
-        TrackerRole::RightElbow,
-        TrackerRole::LeftShoulder,
-        TrackerRole::RightShoulder
+    struct TrackerInit { TrackerRole role; mpsc::Receiver<Pose> receiver; };
+    TrackerInit trackerInits[] = {
+        { TrackerRole::Waist, std::move(waistRx) },
+        { TrackerRole::Chest, std::move(chestRx) },
+        { TrackerRole::LeftFoot, std::move(leftFootRx) },
+        { TrackerRole::RightFoot, std::move(rightFootRx) },
+        { TrackerRole::LeftKnee, std::move(leftKneeRx) },
+        { TrackerRole::RightKnee, std::move(rightKneeRx) },
+        { TrackerRole::LeftElbow, std::move(leftElbowRx) },
+        { TrackerRole::RightElbow, std::move(rightElbowRx) },
+        { TrackerRole::LeftShoulder, std::move(leftShoulderRx) },
+        { TrackerRole::RightShoulder, std::move(rightShoulderRx) }
     };
 
     for (size_t i = 0; i < m_trackers.size(); ++i)
     {
-        m_trackers[i] = std::make_unique<TrackerDriver>(trackerRoles[i]);
+        m_trackers[i] = std::make_unique<TrackerDriver>(
+            trackerInits[i].role,
+            std::move(trackerInits[i].receiver)
+        );
         if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
                 m_trackers[i]->GetSerialNumber(),
                 vr::TrackedDeviceClass_GenericTracker,
@@ -63,11 +113,18 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
         }
     }
 
+    // Initialize socket manager (starts listening)
+    m_pSocketManager->Init();
+
     return vr::VRInitError_None;
 }
 
 void AIVRDeviceProvider::Cleanup()
 {
+    // Reset socket manager first - this closes channels and stops threads
+    m_pSocketManager.reset();
+
+    // Then reset devices (their receiver threads will exit when channels close)
     for (auto& tracker : m_trackers)
     {
         tracker.reset();
@@ -85,62 +142,7 @@ const char* const* AIVRDeviceProvider::GetInterfaceVersions()
 
 void AIVRDeviceProvider::RunFrame()
 {
-    if (m_pHmd)
-    {
-        m_pHmd->RunFrame();
-
-        // Get controller input from socket and pass to controllers
-        if (auto input = m_pHmd->GetNextControllerInput())
-        {
-            if (m_pLeftController)
-            {
-                m_pLeftController->UpdateInput(*input);
-            }
-            if (m_pRightController)
-            {
-                m_pRightController->UpdateInput(*input);
-            }
-        }
-
-        // Get body pose from socket and pass to trackers
-        if (auto bodyPose = m_pHmd->GetNextBodyPose())
-        {
-            // Update trackers with body poses
-            // Order matches TrackerRole enum and m_trackers array
-            if (m_trackers[0]) m_trackers[0]->UpdatePose(bodyPose->waist);
-            if (m_trackers[1]) m_trackers[1]->UpdatePose(bodyPose->chest);
-            if (m_trackers[2]) m_trackers[2]->UpdatePose(bodyPose->leftFoot);
-            if (m_trackers[3]) m_trackers[3]->UpdatePose(bodyPose->rightFoot);
-            if (m_trackers[4]) m_trackers[4]->UpdatePose(bodyPose->leftKnee);
-            if (m_trackers[5]) m_trackers[5]->UpdatePose(bodyPose->rightKnee);
-            if (m_trackers[6]) m_trackers[6]->UpdatePose(bodyPose->leftElbow);
-            if (m_trackers[7]) m_trackers[7]->UpdatePose(bodyPose->rightElbow);
-            if (m_trackers[8]) m_trackers[8]->UpdatePose(bodyPose->leftShoulder);
-            if (m_trackers[9]) m_trackers[9]->UpdatePose(bodyPose->rightShoulder);
-
-            // Update controller positions from body pose hands
-            if (m_pLeftController)
-            {
-                m_pLeftController->UpdateHandPose(bodyPose->leftHand);
-            }
-            if (m_pRightController)
-            {
-                m_pRightController->UpdateHandPose(bodyPose->rightHand);
-            }
-        }
-    }
-
-    // Run controller frames
-    if (m_pLeftController)
-    {
-        m_pLeftController->RunFrame();
-    }
-    if (m_pRightController)
-    {
-        m_pRightController->RunFrame();
-    }
-
-    // Poll events
+    // Poll events only - pose/input updates happen via channel threads
     vr::VREvent_t event;
     while (vr::VRServerDriverHost()->PollNextEvent(&event, sizeof(event)))
     {

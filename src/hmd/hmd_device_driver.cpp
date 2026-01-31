@@ -7,10 +7,11 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-Driver::Driver()
+Driver::Driver(mpsc::Receiver<Position> positionReceiver, SocketManager* socketManager)
+    : m_positionReceiver(std::move(positionReceiver))
+    , m_pSocketManager(socketManager)
 {
     InitD3D11();
-    m_socketManager.Init();
 }
 
 Driver::~Driver()
@@ -79,11 +80,44 @@ vr::EVRInitError Driver::Activate(uint32_t unObjectId)
     // Indicate this is not a real display
     vr::VRProperties()->SetBoolProperty(props, vr::Prop_IsOnDesktop_Bool, false);
 
+    // Start pose update thread
+    m_poseThread = std::jthread([this](std::stop_token st) {
+        while (!st.stop_requested())
+        {
+            if (auto pos = m_positionReceiver.recv())
+            {
+                vr::DriverPose_t pose = {};
+                pose.poseIsValid = true;
+                pose.result = vr::TrackingResult_Running_OK;
+                pose.deviceIsConnected = true;
+                pose.qWorldFromDriverRotation.w = 1.0;
+                pose.qDriverFromHeadRotation.w = 1.0;
+                pose.vecPosition[0] = pos->x;
+                pose.vecPosition[1] = pos->y;
+                pose.vecPosition[2] = pos->z;
+                pose.qRotation.w = pos->qw;
+                pose.qRotation.x = pos->qx;
+                pose.qRotation.y = pos->qy;
+                pose.qRotation.z = pos->qz;
+                vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId, pose, sizeof(vr::DriverPose_t));
+            }
+            else
+            {
+                break; // Channel closed
+            }
+        }
+    });
+
     return vr::VRInitError_None;
 }
 
 void Driver::Deactivate()
 {
+    if (m_poseThread.joinable())
+    {
+        m_poseThread.request_stop();
+        m_poseThread.join();
+    }
     m_unObjectId = vr::k_unTrackedDeviceIndexInvalid;
 }
 
@@ -116,40 +150,9 @@ void Driver::DebugRequest(const char* pchRequest, char* pchResponseBuffer, uint3
 
 vr::DriverPose_t Driver::GetPose()
 {
-    // Update with latest position from socket if available
-    if (auto newPos = m_socketManager.GetNextPosition())
-    {
-        m_lastPosition = *newPos;
-    }
-
+    // Deprecated - poses are pushed via TrackedDevicePoseUpdated
     vr::DriverPose_t pose = {};
-
-    pose.poseIsValid = true;
-    pose.result = vr::TrackingResult_Running_OK;
-    pose.deviceIsConnected = true;
-
-    // Identity quaternion (no rotation)
-    pose.qWorldFromDriverRotation.w = 1.0;
-    pose.qWorldFromDriverRotation.x = 0.0;
-    pose.qWorldFromDriverRotation.y = 0.0;
-    pose.qWorldFromDriverRotation.z = 0.0;
-
-    pose.qDriverFromHeadRotation.w = 1.0;
-    pose.qDriverFromHeadRotation.x = 0.0;
-    pose.qDriverFromHeadRotation.y = 0.0;
-    pose.qDriverFromHeadRotation.z = 0.0;
-
-    // Position from socket
-    pose.vecPosition[0] = m_lastPosition.x;
-    pose.vecPosition[1] = m_lastPosition.y;
-    pose.vecPosition[2] = m_lastPosition.z;
-
-    // Rotation from socket (quaternion)
-    pose.qRotation.w = m_lastPosition.qw;
-    pose.qRotation.x = m_lastPosition.qx;
-    pose.qRotation.y = m_lastPosition.qy;
-    pose.qRotation.z = m_lastPosition.qz;
-
+    pose.poseIsValid = false;
     return pose;
 }
 
@@ -159,7 +162,7 @@ void Driver::GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint
 {
     *pnX = 0;
     *pnY = 0;
-    *pnWidth = m_renderWidth * 2;  // Both eyes side by side
+    *pnWidth = m_renderWidth * 2;
     *pnHeight = m_renderHeight;
 }
 
@@ -170,7 +173,7 @@ bool Driver::IsDisplayOnDesktop()
 
 bool Driver::IsDisplayRealDisplay()
 {
-    return false;  // Virtual display
+    return false;
 }
 
 void Driver::GetRecommendedRenderTargetSize(uint32_t* pnWidth, uint32_t* pnHeight)
@@ -197,7 +200,6 @@ void Driver::GetEyeOutputViewport(vr::EVREye eEye, uint32_t* pnX, uint32_t* pnY,
 
 void Driver::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, float* pfTop, float* pfBottom)
 {
-    // Standard ~110 degree FOV
     *pfLeft = -1.0f;
     *pfRight = 1.0f;
     *pfTop = -1.0f;
@@ -206,7 +208,6 @@ void Driver::GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, fl
 
 vr::DistortionCoordinates_t Driver::ComputeDistortion(vr::EVREye eEye, float fU, float fV)
 {
-    // No distortion - passthrough
     vr::DistortionCoordinates_t coords;
     coords.rfRed[0] = fU;
     coords.rfRed[1] = fV;
@@ -219,7 +220,6 @@ vr::DistortionCoordinates_t Driver::ComputeDistortion(vr::EVREye eEye, float fU,
 
 bool Driver::ComputeInverseDistortion(vr::HmdVector2_t* pResult, vr::EVREye eEye, uint32_t unChannel, float fU, float fV)
 {
-    // No distortion - inverse is same as input
     pResult->v[0] = fU;
     pResult->v[1] = fV;
     return true;
@@ -254,7 +254,6 @@ void Driver::CreateSwapTextureSet(uint32_t unPid, const SwapTextureSetDesc_t* pS
         if (FAILED(hr))
             return;
 
-        // Get shared handle
         ComPtr<IDXGIResource> dxgiResource;
         hr = setData.textures[i].As(&dxgiResource);
         if (SUCCEEDED(hr))
@@ -328,13 +327,11 @@ void Driver::GetNextSwapTextureSetIndex(vr::SharedTextureHandle_t sharedTextureH
     }
 }
 
-// Store the last submitted textures and bounds so we can send them in Present()
 static vr::SharedTextureHandle_t s_lastSubmittedTextures[2] = { 0, 0 };
 static vr::VRTextureBounds_t s_lastSubmittedBounds[2] = {};
 
 void Driver::SubmitLayer(const SubmitLayerPerEye_t (&perEye)[2])
 {
-    // Store texture handles and bounds for sending in Present()
     s_lastSubmittedTextures[0] = perEye[0].hTexture;
     s_lastSubmittedTextures[1] = perEye[1].hTexture;
     s_lastSubmittedBounds[0] = perEye[0].bounds;
@@ -345,16 +342,14 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 {
     m_frameCount++;
 
-    if (!m_pD3DDevice)
+    if (!m_pD3DDevice || !m_pSocketManager)
         return;
 
-    // Open and send textures for both eyes
     for (int eye = 0; eye < 2; eye++)
     {
         if (s_lastSubmittedTextures[eye] == 0)
             continue;
 
-        // Open the shared texture directly from the handle
         ComPtr<ID3D11Texture2D> pTexture;
         HRESULT hr = m_pD3DDevice->OpenSharedResource(
             reinterpret_cast<HANDLE>(s_lastSubmittedTextures[eye]),
@@ -364,11 +359,9 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
         if (FAILED(hr) || !pTexture)
             continue;
 
-        // Get texture description
         D3D11_TEXTURE2D_DESC desc;
         pTexture->GetDesc(&desc);
 
-        // Create or recreate staging texture if needed
         if (!m_pStagingTexture || m_stagingWidth != desc.Width || m_stagingHeight != desc.Height || m_stagingFormat != desc.Format)
         {
             m_pStagingTexture.Reset();
@@ -396,15 +389,12 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
             m_stagingFormat = desc.Format;
         }
 
-        // Copy texture to staging
         m_pD3DContext->CopyResource(m_pStagingTexture.Get(), pTexture.Get());
 
-        // Map staging texture
         D3D11_MAPPED_SUBRESOURCE mapped;
         if (FAILED(m_pD3DContext->Map(m_pStagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mapped)))
             continue;
 
-        // Calculate cropped region from bounds
         const auto& bounds = s_lastSubmittedBounds[eye];
         uint32_t cropX = static_cast<uint32_t>(bounds.uMin * m_stagingWidth);
         uint32_t cropY = static_cast<uint32_t>(bounds.vMin * m_stagingHeight);
@@ -416,7 +406,6 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
         if (cropX + cropW > m_stagingWidth) cropW = m_stagingWidth - cropX;
         if (cropY + cropH > m_stagingHeight) cropH = m_stagingHeight - cropY;
 
-        // Copy cropped pixels into contiguous buffer
         uint8_t* srcData = static_cast<uint8_t*>(mapped.pData);
         std::vector<uint8_t> buffer(cropW * cropH * 4);
 
@@ -429,15 +418,13 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 
         m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
 
-        // Send frame via socket manager
         Frame frame { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
-        m_socketManager.SendFrame(frame);
+        m_pSocketManager->SendFrame(frame);
     }
 }
 
 void Driver::PostPresent(const Throttling_t* pThrottling)
 {
-    // Called after Present, can do additional work here
 }
 
 void Driver::GetFrameTiming(vr::DriverDirectMode_FrameTiming* pFrameTiming)
@@ -452,29 +439,6 @@ void Driver::GetFrameTiming(vr::DriverDirectMode_FrameTiming* pFrameTiming)
     }
 }
 
-void Driver::RunFrame()
-{
-    // Update pose each frame
-    if (m_unObjectId != vr::k_unTrackedDeviceIndexInvalid)
-    {
-        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(
-            m_unObjectId,
-            GetPose(),
-            sizeof(vr::DriverPose_t));
-    }
-}
-
 void Driver::ProcessEvent(const vr::VREvent_t& event)
 {
-    // Handle events if needed
-}
-
-std::optional<ControllerInput> Driver::GetNextControllerInput()
-{
-    return m_socketManager.GetNextControllerInput();
-}
-
-std::optional<BodyPose> Driver::GetNextBodyPose()
-{
-    return m_socketManager.GetNextBodyPose();
 }
