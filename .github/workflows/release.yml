@@ -61,6 +61,8 @@ jobs:
   release:
     needs: [build-driver, publish-pypi]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
     - name: Download driver artifact
