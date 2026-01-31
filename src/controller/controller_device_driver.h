@@ -53,6 +53,10 @@ private:
     // Haptic
     vr::VRInputComponentHandle_t m_hapticHandle = vr::k_ulInvalidInputComponentHandle;
 
+    // Thread functions
+    void InputUpdateThreadFunc(std::stop_token st);
+    void PoseUpdateThreadFunc(std::stop_token st);
+
     // Input channel
     mpsc::Receiver<ControllerInput> m_inputReceiver;
     std::jthread m_inputThread;

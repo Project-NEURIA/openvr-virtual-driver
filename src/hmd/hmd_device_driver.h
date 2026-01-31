@@ -56,7 +56,7 @@ public:
 private:
     bool InitD3D11();
     void CleanupD3D11();
-    void PoseUpdateThread();
+    void PoseUpdateThreadFunc(std::stop_token st);
 
     uint32_t m_unObjectId = vr::k_unTrackedDeviceIndexInvalid;
     std::string m_serialNumber = "OVD-HMD-001";

@@ -1,4 +1,5 @@
 #include "controller_device_driver.h"
+#include <chrono>
 
 ControllerDriver::ControllerDriver(vr::ETrackedControllerRole role,
                                    mpsc::Receiver<ControllerInput> inputReceiver,
@@ -62,92 +63,86 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
     // Create haptic component
     vr::VRDriverInput()->CreateHapticComponent(container, "/output/haptic", &m_hapticHandle);
 
-    // Send initial T-pose hand position
-    {
-        vr::DriverPose_t pose = {};
-        pose.poseIsValid = true;
-        pose.result = vr::TrackingResult_Running_OK;
-        pose.deviceIsConnected = true;
-        pose.qWorldFromDriverRotation.w = 1.0;
-        pose.qDriverFromHeadRotation.w = 1.0;
-        // Left hand at (-0.67, 1.41, 0), Right hand at (0.67, 1.41, 0)
-        pose.vecPosition[0] = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.67 : 0.67;
-        pose.vecPosition[1] = 1.41;
-        pose.vecPosition[2] = 0.0;
-        pose.qRotation.w = 1.0;
-        pose.qRotation.x = 0.0;
-        pose.qRotation.y = 0.0;
-        pose.qRotation.z = 0.0;
-        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, pose, sizeof(vr::DriverPose_t));
-    }
-
     // Start input update thread
-    m_inputThread = std::jthread([this](std::stop_token st) {
-        while (!st.stop_requested())
-        {
-            if (auto input = m_inputReceiver.recv())
-            {
-                vr::VRDriverInput()->UpdateScalarComponent(m_joystickXHandle, input->joystickX, 0);
-                vr::VRDriverInput()->UpdateScalarComponent(m_joystickYHandle, input->joystickY, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_joystickClickHandle, input->joystickClick, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_joystickTouchHandle, input->joystickTouch, 0);
-
-                vr::VRDriverInput()->UpdateScalarComponent(m_triggerValueHandle, input->trigger, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_triggerClickHandle, input->triggerClick, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_triggerTouchHandle, input->triggerTouch, 0);
-
-                vr::VRDriverInput()->UpdateScalarComponent(m_gripValueHandle, input->grip, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_gripClickHandle, input->gripClick, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_gripTouchHandle, input->gripTouch, 0);
-
-                vr::VRDriverInput()->UpdateBooleanComponent(m_aClickHandle, input->aClick, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_aTouchHandle, input->aTouch, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_bClickHandle, input->bClick, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_bTouchHandle, input->bTouch, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_systemClickHandle, input->systemClick, 0);
-                vr::VRDriverInput()->UpdateBooleanComponent(m_menuClickHandle, input->menuClick, 0);
-            }
-            else
-            {
-                break; // Channel closed
-            }
-        }
-    });
+    m_inputThread = std::jthread([this](std::stop_token st) { InputUpdateThreadFunc(st); });
 
     // Start pose update thread
-    m_poseThread = std::jthread([this](std::stop_token st) {
-        while (!st.stop_requested())
-        {
-            if (auto p = m_poseReceiver.recv())
-            {
-                vr::DriverPose_t pose = {};
-                pose.qWorldFromDriverRotation.w = 1.0;
-                pose.qDriverFromHeadRotation.w = 1.0;
-                pose.vecPosition[0] = p->posX;
-                pose.vecPosition[1] = p->posY;
-                pose.vecPosition[2] = p->posZ;
-                pose.qRotation.w = p->rotW;
-                pose.qRotation.x = p->rotX;
-                pose.qRotation.y = p->rotY;
-                pose.qRotation.z = p->rotZ;
-                if (pose.qRotation.w == 0.0 && pose.qRotation.x == 0.0 &&
-                    pose.qRotation.y == 0.0 && pose.qRotation.z == 0.0)
-                {
-                    pose.qRotation.w = 1.0;
-                }
-                pose.poseIsValid = true;
-                pose.deviceIsConnected = true;
-                pose.result = vr::TrackingResult_Running_OK;
-                vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, pose, sizeof(vr::DriverPose_t));
-            }
-            else
-            {
-                break; // Channel closed
-            }
-        }
-    });
+    m_poseThread = std::jthread([this](std::stop_token st) { PoseUpdateThreadFunc(st); });
 
     return vr::VRInitError_None;
+}
+
+void ControllerDriver::InputUpdateThreadFunc(std::stop_token st)
+{
+    while (!st.stop_requested())
+    {
+        if (auto input = m_inputReceiver.recv())
+        {
+            vr::VRDriverInput()->UpdateScalarComponent(m_joystickXHandle, input->joystickX, 0);
+            vr::VRDriverInput()->UpdateScalarComponent(m_joystickYHandle, input->joystickY, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_joystickClickHandle, input->joystickClick, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_joystickTouchHandle, input->joystickTouch, 0);
+
+            vr::VRDriverInput()->UpdateScalarComponent(m_triggerValueHandle, input->trigger, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_triggerClickHandle, input->triggerClick, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_triggerTouchHandle, input->triggerTouch, 0);
+
+            vr::VRDriverInput()->UpdateScalarComponent(m_gripValueHandle, input->grip, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_gripClickHandle, input->gripClick, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_gripTouchHandle, input->gripTouch, 0);
+
+            vr::VRDriverInput()->UpdateBooleanComponent(m_aClickHandle, input->aClick, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_aTouchHandle, input->aTouch, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_bClickHandle, input->bClick, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_bTouchHandle, input->bTouch, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_systemClickHandle, input->systemClick, 0);
+            vr::VRDriverInput()->UpdateBooleanComponent(m_menuClickHandle, input->menuClick, 0);
+        }
+        else
+        {
+            break; // Channel closed
+        }
+    }
+}
+
+void ControllerDriver::PoseUpdateThreadFunc(std::stop_token st)
+{
+    // Initialize with T-pose hand position
+    vr::DriverPose_t pose = {};
+    pose.poseIsValid = true;
+    pose.result = vr::TrackingResult_Running_OK;
+    pose.deviceIsConnected = true;
+    pose.qWorldFromDriverRotation.w = 1.0;
+    pose.qDriverFromHeadRotation.w = 1.0;
+    pose.vecPosition[0] = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.67 : 0.67;
+    pose.vecPosition[1] = 1.41;
+    pose.vecPosition[2] = 0.0;
+    pose.qRotation.w = 1.0;
+
+    while (!st.stop_requested())
+    {
+        // Check for new pose (non-blocking)
+        if (auto p = m_poseReceiver.try_recv())
+        {
+            pose.vecPosition[0] = p->posX;
+            pose.vecPosition[1] = p->posY;
+            pose.vecPosition[2] = p->posZ;
+            pose.qRotation.w = p->rotW;
+            pose.qRotation.x = p->rotX;
+            pose.qRotation.y = p->rotY;
+            pose.qRotation.z = p->rotZ;
+            if (pose.qRotation.w == 0.0 && pose.qRotation.x == 0.0 &&
+                pose.qRotation.y == 0.0 && pose.qRotation.z == 0.0)
+            {
+                pose.qRotation.w = 1.0;
+            }
+        }
+
+        // Always send current pose
+        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, pose, sizeof(vr::DriverPose_t));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(11)); // ~90Hz
+    }
 }
 
 void ControllerDriver::Deactivate()

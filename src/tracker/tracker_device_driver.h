@@ -36,6 +36,8 @@ public:
     const char* GetSerialNumber() const { return m_serialNumber.c_str(); }
 
 private:
+    void PoseUpdateThreadFunc(std::stop_token st);
+
     TrackerRole m_role;
     std::string m_serialNumber;
     uint32_t m_deviceIndex = vr::k_unTrackedDeviceIndexInvalid;

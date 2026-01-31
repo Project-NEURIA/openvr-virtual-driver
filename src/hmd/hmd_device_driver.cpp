@@ -80,53 +80,45 @@ vr::EVRInitError Driver::Activate(uint32_t unObjectId)
     // Indicate this is not a real display
     vr::VRProperties()->SetBoolProperty(props, vr::Prop_IsOnDesktop_Bool, false);
 
-    // Send initial T-pose HMD position (0, 1.7, 0) with identity rotation
-    {
-        vr::DriverPose_t pose = {};
-        pose.poseIsValid = true;
-        pose.result = vr::TrackingResult_Running_OK;
-        pose.deviceIsConnected = true;
-        pose.qWorldFromDriverRotation.w = 1.0;
-        pose.qDriverFromHeadRotation.w = 1.0;
-        pose.vecPosition[0] = 0.0;
-        pose.vecPosition[1] = 1.7;
-        pose.vecPosition[2] = 0.0;
-        pose.qRotation.w = 1.0;
-        pose.qRotation.x = 0.0;
-        pose.qRotation.y = 0.0;
-        pose.qRotation.z = 0.0;
-        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId, pose, sizeof(vr::DriverPose_t));
-    }
-
     // Start pose update thread
-    m_poseThread = std::jthread([this](std::stop_token st) {
-        while (!st.stop_requested())
-        {
-            if (auto pos = m_positionReceiver.recv())
-            {
-                vr::DriverPose_t pose = {};
-                pose.poseIsValid = true;
-                pose.result = vr::TrackingResult_Running_OK;
-                pose.deviceIsConnected = true;
-                pose.qWorldFromDriverRotation.w = 1.0;
-                pose.qDriverFromHeadRotation.w = 1.0;
-                pose.vecPosition[0] = pos->x;
-                pose.vecPosition[1] = pos->y;
-                pose.vecPosition[2] = pos->z;
-                pose.qRotation.w = pos->qw;
-                pose.qRotation.x = pos->qx;
-                pose.qRotation.y = pos->qy;
-                pose.qRotation.z = pos->qz;
-                vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId, pose, sizeof(vr::DriverPose_t));
-            }
-            else
-            {
-                break; // Channel closed
-            }
-        }
-    });
+    m_poseThread = std::jthread([this](std::stop_token st) { PoseUpdateThreadFunc(st); });
 
     return vr::VRInitError_None;
+}
+
+void Driver::PoseUpdateThreadFunc(std::stop_token st)
+{
+    // Initialize with T-pose HMD position
+    vr::DriverPose_t pose = {};
+    pose.poseIsValid = true;
+    pose.result = vr::TrackingResult_Running_OK;
+    pose.deviceIsConnected = true;
+    pose.qWorldFromDriverRotation.w = 1.0;
+    pose.qDriverFromHeadRotation.w = 1.0;
+    pose.vecPosition[0] = 0.0;
+    pose.vecPosition[1] = 1.7;
+    pose.vecPosition[2] = 0.0;
+    pose.qRotation.w = 1.0;
+
+    while (!st.stop_requested())
+    {
+        // Check for new position (non-blocking)
+        if (auto pos = m_positionReceiver.try_recv())
+        {
+            pose.vecPosition[0] = pos->x;
+            pose.vecPosition[1] = pos->y;
+            pose.vecPosition[2] = pos->z;
+            pose.qRotation.w = pos->qw;
+            pose.qRotation.x = pos->qx;
+            pose.qRotation.y = pos->qy;
+            pose.qRotation.z = pos->qz;
+        }
+
+        // Always send current pose
+        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId, pose, sizeof(vr::DriverPose_t));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(11)); // ~90Hz
+    }
 }
 
 void Driver::Deactivate()
