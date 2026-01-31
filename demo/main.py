@@ -163,7 +163,7 @@ def main():
 
     print("Mouse captured. Move mouse to look around. WASD to move.")
     print("1=Trigger, 2=Grip, 3=A, 4=B, 5=Joystick click, 6=Menu.")
-    print("Arrow keys = aim right controller. ESC to quit.")
+    print("Hold ` (backtick) + mouse = aim right controller. ESC to quit.")
     print("P = Play/Pause VMD, R = Reset. T-pose sent by default.")
 
     # Position and rotation
@@ -172,7 +172,6 @@ def main():
 
     # Right controller rotation
     right_yaw, right_pitch = 0.0, 0.0
-    CONTROLLER_SENSITIVITY = 0.05
 
     # Animation timing
     last_time = time.time()
@@ -213,17 +212,30 @@ def main():
                     dx, dy = event.rel
 
                     if dx != 0 or dy != 0:
-                        yaw -= dx * SENSITIVITY
-                        pitch -= dy * SENSITIVITY
+                        # Check if backtick is held - control right hand instead of head
+                        keys_now = pygame.key.get_pressed()
+                        if keys_now[pygame.K_BACKQUOTE]:
+                            # Control right hand
+                            right_yaw -= dx * SENSITIVITY
+                            right_pitch -= dy * SENSITIVITY
 
-                        # Clamp pitch to avoid gimbal lock
-                        pitch = max(-math.pi / 2 + 0.01, min(math.pi / 2 - 0.01, pitch))
+                            # Clamp pitch
+                            right_pitch = max(-math.pi / 2, min(math.pi / 2, right_pitch))
 
-                        # Convert to quaternion and send
-                        qw, qx, qy, qz = euler_to_quaternion(yaw, pitch)
-                        send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
+                            print(f"Right hand: yaw={math.degrees(right_yaw):.1f}° pitch={math.degrees(right_pitch):.1f}°")
+                        else:
+                            # Control head
+                            yaw -= dx * SENSITIVITY
+                            pitch -= dy * SENSITIVITY
 
-                        print(f"Rotation: yaw={math.degrees(yaw):.1f}° pitch={math.degrees(pitch):.1f}°")
+                            # Clamp pitch to avoid gimbal lock
+                            pitch = max(-math.pi / 2 + 0.01, min(math.pi / 2 - 0.01, pitch))
+
+                            # Convert to quaternion and send
+                            qw, qx, qy, qz = euler_to_quaternion(yaw, pitch)
+                            send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
+
+                            print(f"Rotation: yaw={math.degrees(yaw):.1f}° pitch={math.degrees(pitch):.1f}°")
 
             # Handle WASD movement
             keys = pygame.key.get_pressed()
@@ -270,18 +282,6 @@ def main():
             joystick_click = keys[pygame.K_5]
             menu_click = keys[pygame.K_6]
 
-            # Arrow keys for right controller rotation
-            if keys[pygame.K_LEFT]:
-                right_yaw += CONTROLLER_SENSITIVITY
-            if keys[pygame.K_RIGHT]:
-                right_yaw -= CONTROLLER_SENSITIVITY
-            if keys[pygame.K_UP]:
-                right_pitch += CONTROLLER_SENSITIVITY
-            if keys[pygame.K_DOWN]:
-                right_pitch -= CONTROLLER_SENSITIVITY
-
-            # Clamp pitch
-            right_pitch = max(-math.pi / 2, min(math.pi / 2, right_pitch))
 
             send_controller(conn,
                 joystick_x=0.0, joystick_y=0.0, joystick_click=joystick_click, joystick_touch=False,
