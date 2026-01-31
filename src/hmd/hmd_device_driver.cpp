@@ -7,8 +7,8 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-Driver::Driver(mpsc::Receiver<Position> positionReceiver, SocketManager* socketManager)
-    : m_positionReceiver(std::move(positionReceiver))
+Driver::Driver(mpsc::Receiver<Pose> poseReceiver, SocketManager* socketManager)
+    : m_poseReceiver(std::move(poseReceiver))
     , m_pSocketManager(socketManager)
 {
     InitD3D11();
@@ -102,16 +102,16 @@ void Driver::PoseUpdateThreadFunc(std::stop_token st)
 
     while (!st.stop_requested())
     {
-        // Check for new position (non-blocking)
-        if (auto pos = m_positionReceiver.try_recv())
+        // Check for new pose (non-blocking)
+        if (auto p = m_poseReceiver.try_recv())
         {
-            pose.vecPosition[0] = pos->x;
-            pose.vecPosition[1] = pos->y;
-            pose.vecPosition[2] = pos->z;
-            pose.qRotation.w = pos->qw;
-            pose.qRotation.x = pos->qx;
-            pose.qRotation.y = pos->qy;
-            pose.qRotation.z = pos->qz;
+            pose.vecPosition[0] = p->posX;
+            pose.vecPosition[1] = p->posY;
+            pose.vecPosition[2] = p->posZ;
+            pose.qRotation.w = p->rotW;
+            pose.qRotation.x = p->rotX;
+            pose.qRotation.y = p->rotY;
+            pose.qRotation.z = p->rotZ;
         }
 
         // Always send current pose

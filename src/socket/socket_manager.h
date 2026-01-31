@@ -14,24 +14,13 @@
 
 enum class MsgType : uint32_t {
     Frame = 0,
-    Position = 1,
-    Controller = 2,
-    BodyPose = 3
+    BodyPosition = 1,
+    Controller = 2
 };
 
 struct MsgHeader {
     MsgType type;
     uint32_t size;
-};
-
-struct Position {
-    double x;
-    double y;
-    double z;
-    double qw;
-    double qx;
-    double qy;
-    double qz;
 };
 
 struct Frame {
@@ -71,9 +60,16 @@ struct ControllerInput {
 struct Pose {
     float posX, posY, posZ;
     float rotW, rotX, rotY, rotZ;  // quaternion
+
+    bool isNull() const {
+        return posX == 0.0f && posY == 0.0f && posZ == 0.0f &&
+               rotW == 0.0f && rotX == 0.0f && rotY == 0.0f && rotZ == 0.0f;
+    }
 };
 
-struct BodyPose {
+struct BodyPosition {
+    // HMD
+    Pose head;
     // Controllers (hands)
     Pose leftHand;
     Pose rightHand;
@@ -109,7 +105,7 @@ class SocketManager
 {
 public:
     SocketManager(
-        mpsc::Sender<Position> positionSender,
+        mpsc::Sender<Pose> headPoseSender,
         mpsc::Sender<ControllerInput> leftControllerInputSender,
         mpsc::Sender<ControllerInput> rightControllerInputSender,
         mpsc::Sender<Pose> leftHandPoseSender,
@@ -125,7 +121,7 @@ private:
     void Receive(std::stop_token st);
 
     // Channel senders
-    mpsc::Sender<Position> m_positionSender;
+    mpsc::Sender<Pose> m_headPoseSender;
     mpsc::Sender<ControllerInput> m_leftControllerInputSender;
     mpsc::Sender<ControllerInput> m_rightControllerInputSender;
     mpsc::Sender<Pose> m_leftHandPoseSender;

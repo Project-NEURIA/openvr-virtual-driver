@@ -18,7 +18,7 @@ class Driver : public vr::ITrackedDeviceServerDriver,
                public vr::IVRDriverDirectModeComponent
 {
 public:
-    Driver(mpsc::Receiver<Position> positionReceiver, SocketManager* socketManager);
+    Driver(mpsc::Receiver<Pose> poseReceiver, SocketManager* socketManager);
     ~Driver();
 
     // ITrackedDeviceServerDriver interface
@@ -90,8 +90,8 @@ private:
     // Networking
     SocketManager* m_pSocketManager;
 
-    // Position channel
-    mpsc::Receiver<Position> m_positionReceiver;
+    // Head pose channel
+    mpsc::Receiver<Pose> m_poseReceiver;
     std::jthread m_poseThread;
 
     // Frame counter

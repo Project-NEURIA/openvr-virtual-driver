@@ -3,38 +3,38 @@ import struct
 import math
 import time
 import os
+import sys
 import numpy as np
 import pygame
 
-from vmd_parser import VMDPlayer
+# Add client/src to path for VMDPlayer import
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'client', 'src'))
+from vmd import VMDPlayer
 
 
 # Protocol:
 # MsgHeader (8 bytes): type (u32) | size (u32)
 # Frame (type=0): width (u32) | height (u32) | eye (u32) | pixels (width * height * 4 bytes)
-# Position (type=1): x, y, z, qw, qx, qy, qz (7 doubles = 56 bytes)
+# BodyPosition (type=1): 13 Pose structs (head + 12 body parts, 7 floats each = 364 bytes)
 # Controller (type=2): joystick_x, joystick_y (floats), joystick_click, joystick_touch,
 #                      trigger (float), trigger_click, trigger_touch,
 #                      grip (float), grip_click, grip_touch,
 #                      a_click, a_touch, b_click, b_touch, system_click, menu_click (all uint8),
 #                      right_yaw, right_pitch (floats)
-# BodyPose (type=3): 12 Pose structs (see below)
 #
-# All positions are absolute world coordinates. Clients should send Position, Controller,
-# and BodyPose at 60-90Hz for smooth tracking. The driver updates SteamVR immediately upon
-# receiving data - there is no internal polling/interpolation.
+# All positions are absolute world coordinates. Clients should send BodyPosition and Controller
+# at 60-90Hz for smooth tracking. The driver updates SteamVR immediately upon receiving data.
 
 MSG_HEADER_SIZE = 8
 FRAME_INFO_SIZE = 12
 MSG_TYPE_FRAME = 0
-MSG_TYPE_POSITION = 1
+MSG_TYPE_BODY_POSITION = 1
 MSG_TYPE_CONTROLLER = 2
-MSG_TYPE_BODY_POSE = 3
 
 # Pose struct: posX, posY, posZ, rotW, rotX, rotY, rotZ (7 floats = 28 bytes)
 POSE_SIZE = 28
-# BodyPose: 12 poses (leftHand, rightHand, waist, chest, leftFoot, rightFoot, leftKnee, rightKnee, leftElbow, rightElbow, leftShoulder, rightShoulder)
-BODY_POSE_SIZE = POSE_SIZE * 12
+# BodyPosition: 13 poses (head, leftHand, rightHand, waist, chest, leftFoot, rightFoot, leftKnee, rightKnee, leftElbow, rightElbow, leftShoulder, rightShoulder)
+BODY_POSITION_SIZE = POSE_SIZE * 13
 
 HOST = "127.0.0.1"
 PORT = 21213
@@ -54,13 +54,6 @@ def receive_exact(sock: socket.socket, size: int) -> bytes:
             raise ConnectionError("Connection closed")
         data += chunk
     return data
-
-
-def send_position(sock: socket.socket, x: float, y: float, z: float, qw: float, qx: float, qy: float, qz: float):
-    """Send a position message."""
-    position_data = struct.pack("<7d", x, y, z, qw, qx, qy, qz)
-    header = struct.pack("<II", MSG_TYPE_POSITION, len(position_data))
-    sock.sendall(header + position_data)
 
 
 def send_controller(sock: socket.socket,
@@ -86,27 +79,27 @@ def pack_pose(pos_x: float, pos_y: float, pos_z: float, rot_w: float, rot_x: flo
     return struct.pack("<7f", pos_x, pos_y, pos_z, rot_w, rot_x, rot_y, rot_z)
 
 
-def send_body_pose(sock: socket.socket, body_pose: dict):
-    """Send a body pose message.
+def send_body_position(sock: socket.socket, body_pos: dict):
+    """Send a body position message.
 
-    body_pose should be a dict with keys:
-    'left_hand', 'right_hand', 'waist', 'chest', 'left_foot', 'right_foot',
+    body_pos should be a dict with keys:
+    'head', 'left_hand', 'right_hand', 'waist', 'chest', 'left_foot', 'right_foot',
     'left_knee', 'right_knee', 'left_elbow', 'right_elbow', 'left_shoulder', 'right_shoulder'
 
     Each value should be a tuple of (pos_x, pos_y, pos_z, rot_w, rot_x, rot_y, rot_z)
     """
     pose_order = [
-        'left_hand', 'right_hand', 'waist', 'chest',
+        'head', 'left_hand', 'right_hand', 'waist', 'chest',
         'left_foot', 'right_foot', 'left_knee', 'right_knee',
         'left_elbow', 'right_elbow', 'left_shoulder', 'right_shoulder'
     ]
 
     body_data = b''
     for pose_name in pose_order:
-        pose = body_pose.get(pose_name, (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0))
+        pose = body_pos.get(pose_name, (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0))
         body_data += pack_pose(*pose)
 
-    header = struct.pack("<II", MSG_TYPE_BODY_POSE, len(body_data))
+    header = struct.pack("<II", MSG_TYPE_BODY_POSITION, len(body_data))
     sock.sendall(header + body_data)
 
 
@@ -179,7 +172,6 @@ def main():
     right_yaw, right_pitch = 0.0, 0.0
 
     # Send initial T-pose and HMD position
-    send_position(conn, pos_x, pos_y, pos_z, 1.0, 0.0, 0.0, 0.0)
     send_controller(conn,
         joystick_x=0.0, joystick_y=0.0, joystick_click=False, joystick_touch=False,
         trigger=0.0, trigger_click=False, trigger_touch=False,
@@ -187,7 +179,8 @@ def main():
         a_click=False, a_touch=False, b_click=False, b_touch=False,
         system_click=False, menu_click=False,
         right_yaw=0.0, right_pitch=0.0)
-    initial_body_pose = {
+    initial_body_pos = {
+        'head': (pos_x, pos_y, pos_z, 1.0, 0.0, 0.0, 0.0),
         'waist': (pos_x, 0.93, pos_z, 1.0, 0.0, 0.0, 0.0),
         'chest': (pos_x, 1.29, pos_z, 1.0, 0.0, 0.0, 0.0),
         'left_shoulder': (pos_x - 0.15, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
@@ -201,7 +194,7 @@ def main():
         'left_foot': (pos_x - 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
         'right_foot': (pos_x + 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
     }
-    send_body_pose(conn, initial_body_pose)
+    send_body_position(conn, initial_body_pos)
     print("Initial T-pose sent.")
 
     # Animation timing
@@ -264,10 +257,6 @@ def main():
 
                             # Clamp pitch to avoid gimbal lock
                             pitch = max(-math.pi / 2 + 0.01, min(math.pi / 2 - 0.01, pitch))
-
-                            # Convert to quaternion and send
-                            qw, qx, qy, qz = euler_to_quaternion(yaw, pitch)
-                            send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
                             position_changed = True
 
                             print(f"Rotation: yaw={math.degrees(yaw):.1f}° pitch={math.degrees(pitch):.1f}°")
@@ -299,10 +288,6 @@ def main():
 
                 pos_x += world_x * MOVE_SPEED
                 pos_z -= world_z * MOVE_SPEED
-
-                # Send updated position
-                qw, qx, qy, qz = euler_to_quaternion(yaw, pitch)
-                send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
                 position_changed = True
 
             # Handle controller inputs
@@ -338,11 +323,11 @@ def main():
 
                 # Get head transform for HMD
                 hx, hy, hz, hw, hqx, hqy, hqz = vmd_player.get_head_transform(base_position=(pos_x, 0.0, pos_z))
-                send_position(conn, hx, hy, hz, hw, hqx, hqy, hqz)
 
                 # Get body pose for trackers (current frame, even if paused)
-                body_pose = vmd_player.get_body_pose(base_position=(pos_x, 0.0, pos_z))
-                send_body_pose(conn, body_pose)
+                body_pos = vmd_player.get_body_pose(base_position=(pos_x, 0.0, pos_z))
+                body_pos['head'] = (hx, hy, hz, hw, hqx, hqy, hqz)
+                send_body_position(conn, body_pos)
             elif position_changed:
                 # Send T-pose only when position/rotation changed
                 # Hip at 0.93m, chest higher, shorter upper arms
@@ -356,10 +341,13 @@ def main():
                     rz = offset_x * sin_yaw + offset_z * cos_yaw
                     return (pos_x + rx, height, pos_z + rz)
 
+                # Head rotation quaternion (yaw + pitch)
+                head_qw, head_qx, head_qy, head_qz = euler_to_quaternion(yaw, pitch)
                 # Body rotation quaternion (yaw only)
                 qw, qx, qy, qz = euler_to_quaternion(yaw, 0.0)
 
-                body_pose = {
+                body_pos = {
+                    'head': (pos_x, pos_y, pos_z, head_qw, head_qx, head_qy, head_qz),
                     'waist': (*rotated_pos(0.0, 0.93), qw, qx, qy, qz),
                     'chest': (*rotated_pos(0.0, 1.29), qw, qx, qy, qz),
                     'left_shoulder': (*rotated_pos(-0.15, 1.41), qw, qx, qy, qz),
@@ -373,7 +361,7 @@ def main():
                     'left_foot': (*rotated_pos(-0.09, 0.06), qw, qx, qy, qz),
                     'right_foot': (*rotated_pos(0.09, 0.06), qw, qx, qy, qz),
                 }
-                send_body_pose(conn, body_pose)
+                send_body_position(conn, body_pos)
 
             # Read message header
             msg_header = receive_exact(conn, MSG_HEADER_SIZE)

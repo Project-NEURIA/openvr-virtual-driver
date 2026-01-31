@@ -1,14 +1,14 @@
 #include "socket_manager.h"
 
 SocketManager::SocketManager(
-    mpsc::Sender<Position> positionSender,
+    mpsc::Sender<Pose> headPoseSender,
     mpsc::Sender<ControllerInput> leftControllerInputSender,
     mpsc::Sender<ControllerInput> rightControllerInputSender,
     mpsc::Sender<Pose> leftHandPoseSender,
     mpsc::Sender<Pose> rightHandPoseSender,
     TrackerSenders trackerSenders
 ) :
-    m_positionSender(std::move(positionSender)),
+    m_headPoseSender(std::move(headPoseSender)),
     m_leftControllerInputSender(std::move(leftControllerInputSender)),
     m_rightControllerInputSender(std::move(rightControllerInputSender)),
     m_leftHandPoseSender(std::move(leftHandPoseSender)),
@@ -87,14 +87,40 @@ void SocketManager::Receive(std::stop_token st)
         if (bytes <= 0)
             break;
 
-        if (msgHeader.type == MsgType::Position && msgHeader.size == sizeof(Position))
+        if (msgHeader.type == MsgType::BodyPosition && msgHeader.size == sizeof(BodyPosition))
         {
-            Position position;
-            bytes = recv(clientSocket, reinterpret_cast<char*>(&position), sizeof(Position), MSG_WAITALL);
+            BodyPosition bodyPos;
+            bytes = recv(clientSocket, reinterpret_cast<char*>(&bodyPos), sizeof(BodyPosition), MSG_WAITALL);
             if (bytes <= 0)
                 break;
 
-            m_positionSender.send(position);
+            // Send poses only if not null (all zeros means skip update)
+            if (!bodyPos.head.isNull())
+                m_headPoseSender.send(bodyPos.head);
+            if (!bodyPos.leftHand.isNull())
+                m_leftHandPoseSender.send(bodyPos.leftHand);
+            if (!bodyPos.rightHand.isNull())
+                m_rightHandPoseSender.send(bodyPos.rightHand);
+            if (!bodyPos.waist.isNull())
+                m_trackerSenders.waist.send(bodyPos.waist);
+            if (!bodyPos.chest.isNull())
+                m_trackerSenders.chest.send(bodyPos.chest);
+            if (!bodyPos.leftFoot.isNull())
+                m_trackerSenders.leftFoot.send(bodyPos.leftFoot);
+            if (!bodyPos.rightFoot.isNull())
+                m_trackerSenders.rightFoot.send(bodyPos.rightFoot);
+            if (!bodyPos.leftKnee.isNull())
+                m_trackerSenders.leftKnee.send(bodyPos.leftKnee);
+            if (!bodyPos.rightKnee.isNull())
+                m_trackerSenders.rightKnee.send(bodyPos.rightKnee);
+            if (!bodyPos.leftElbow.isNull())
+                m_trackerSenders.leftElbow.send(bodyPos.leftElbow);
+            if (!bodyPos.rightElbow.isNull())
+                m_trackerSenders.rightElbow.send(bodyPos.rightElbow);
+            if (!bodyPos.leftShoulder.isNull())
+                m_trackerSenders.leftShoulder.send(bodyPos.leftShoulder);
+            if (!bodyPos.rightShoulder.isNull())
+                m_trackerSenders.rightShoulder.send(bodyPos.rightShoulder);
         }
         else if (msgHeader.type == MsgType::Controller && msgHeader.size == sizeof(ControllerInput))
         {
@@ -105,29 +131,6 @@ void SocketManager::Receive(std::stop_token st)
 
             m_leftControllerInputSender.send(input);
             m_rightControllerInputSender.send(input);
-        }
-        else if (msgHeader.type == MsgType::BodyPose && msgHeader.size == sizeof(BodyPose))
-        {
-            BodyPose bodyPose;
-            bytes = recv(clientSocket, reinterpret_cast<char*>(&bodyPose), sizeof(BodyPose), MSG_WAITALL);
-            if (bytes <= 0)
-                break;
-
-            // Send hand poses to controllers
-            m_leftHandPoseSender.send(bodyPose.leftHand);
-            m_rightHandPoseSender.send(bodyPose.rightHand);
-
-            // Send tracker poses
-            m_trackerSenders.waist.send(bodyPose.waist);
-            m_trackerSenders.chest.send(bodyPose.chest);
-            m_trackerSenders.leftFoot.send(bodyPose.leftFoot);
-            m_trackerSenders.rightFoot.send(bodyPose.rightFoot);
-            m_trackerSenders.leftKnee.send(bodyPose.leftKnee);
-            m_trackerSenders.rightKnee.send(bodyPose.rightKnee);
-            m_trackerSenders.leftElbow.send(bodyPose.leftElbow);
-            m_trackerSenders.rightElbow.send(bodyPose.rightElbow);
-            m_trackerSenders.leftShoulder.send(bodyPose.leftShoulder);
-            m_trackerSenders.rightShoulder.send(bodyPose.rightShoulder);
         }
     }
 }

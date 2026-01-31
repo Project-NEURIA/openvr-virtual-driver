@@ -8,8 +8,8 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
 {
     VR_INIT_SERVER_DRIVER_CONTEXT(pDriverContext);
 
-    // Create channels for position (HMD)
-    auto [positionSender, positionReceiver] = mpsc::channel<Position>();
+    // Create channel for head pose (HMD)
+    auto [headPoseTx, headPoseRx] = mpsc::channel<Pose>();
 
     // Create channels for controller inputs
     auto [leftControllerInputTx, leftControllerInputRx] = mpsc::channel<ControllerInput>();
@@ -33,7 +33,7 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
 
     // Create socket manager with all senders
     m_pSocketManager = std::make_unique<SocketManager>(
-        std::move(positionSender),
+        std::move(headPoseTx),
         std::move(leftControllerInputTx),
         std::move(rightControllerInputTx),
         std::move(leftHandPoseTx),
@@ -52,8 +52,8 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
         }
     );
 
-    // Create HMD with position receiver
-    m_pHmd = std::make_unique<Driver>(std::move(positionReceiver), m_pSocketManager.get());
+    // Create HMD with head pose receiver
+    m_pHmd = std::make_unique<Driver>(std::move(headPoseRx), m_pSocketManager.get());
 
     if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
             m_pHmd->GetSerialNumber(),
