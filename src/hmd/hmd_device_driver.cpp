@@ -80,6 +80,24 @@ vr::EVRInitError Driver::Activate(uint32_t unObjectId)
     // Indicate this is not a real display
     vr::VRProperties()->SetBoolProperty(props, vr::Prop_IsOnDesktop_Bool, false);
 
+    // Send initial T-pose HMD position (0, 1.7, 0) with identity rotation
+    {
+        vr::DriverPose_t pose = {};
+        pose.poseIsValid = true;
+        pose.result = vr::TrackingResult_Running_OK;
+        pose.deviceIsConnected = true;
+        pose.qWorldFromDriverRotation.w = 1.0;
+        pose.qDriverFromHeadRotation.w = 1.0;
+        pose.vecPosition[0] = 0.0;
+        pose.vecPosition[1] = 1.7;
+        pose.vecPosition[2] = 0.0;
+        pose.qRotation.w = 1.0;
+        pose.qRotation.x = 0.0;
+        pose.qRotation.y = 0.0;
+        pose.qRotation.z = 0.0;
+        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_unObjectId, pose, sizeof(vr::DriverPose_t));
+    }
+
     // Start pose update thread
     m_poseThread = std::jthread([this](std::stop_token st) {
         while (!st.stop_requested())

@@ -54,6 +54,55 @@ vr::EVRInitError TrackerDriver::Activate(uint32_t unObjectId)
     vr::VRProperties()->SetStringProperty(container, vr::Prop_ControllerType_String, GetTrackerRoleHint(m_role));
     vr::VRProperties()->SetUint64Property(container, vr::Prop_CurrentUniverseId_Uint64, 2);
 
+    // Send initial T-pose position based on tracker role
+    {
+        vr::DriverPose_t pose = {};
+        pose.poseIsValid = true;
+        pose.result = vr::TrackingResult_Running_OK;
+        pose.deviceIsConnected = true;
+        pose.qWorldFromDriverRotation.w = 1.0;
+        pose.qDriverFromHeadRotation.w = 1.0;
+        pose.qRotation.w = 1.0;
+        pose.qRotation.x = 0.0;
+        pose.qRotation.y = 0.0;
+        pose.qRotation.z = 0.0;
+
+        switch (m_role)
+        {
+            case TrackerRole::Waist:
+                pose.vecPosition[0] = 0.0; pose.vecPosition[1] = 0.93; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::Chest:
+                pose.vecPosition[0] = 0.0; pose.vecPosition[1] = 1.29; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::LeftShoulder:
+                pose.vecPosition[0] = -0.15; pose.vecPosition[1] = 1.41; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::RightShoulder:
+                pose.vecPosition[0] = 0.15; pose.vecPosition[1] = 1.41; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::LeftElbow:
+                pose.vecPosition[0] = -0.45; pose.vecPosition[1] = 1.41; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::RightElbow:
+                pose.vecPosition[0] = 0.45; pose.vecPosition[1] = 1.41; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::LeftKnee:
+                pose.vecPosition[0] = -0.09; pose.vecPosition[1] = 0.46; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::RightKnee:
+                pose.vecPosition[0] = 0.09; pose.vecPosition[1] = 0.46; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::LeftFoot:
+                pose.vecPosition[0] = -0.09; pose.vecPosition[1] = 0.06; pose.vecPosition[2] = 0.0;
+                break;
+            case TrackerRole::RightFoot:
+                pose.vecPosition[0] = 0.09; pose.vecPosition[1] = 0.06; pose.vecPosition[2] = 0.0;
+                break;
+        }
+        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, pose, sizeof(vr::DriverPose_t));
+    }
+
     // Start pose update thread
     m_poseThread = std::jthread([this](std::stop_token st) {
         while (!st.stop_requested())

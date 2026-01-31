@@ -62,6 +62,25 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
     // Create haptic component
     vr::VRDriverInput()->CreateHapticComponent(container, "/output/haptic", &m_hapticHandle);
 
+    // Send initial T-pose hand position
+    {
+        vr::DriverPose_t pose = {};
+        pose.poseIsValid = true;
+        pose.result = vr::TrackingResult_Running_OK;
+        pose.deviceIsConnected = true;
+        pose.qWorldFromDriverRotation.w = 1.0;
+        pose.qDriverFromHeadRotation.w = 1.0;
+        // Left hand at (-0.67, 1.41, 0), Right hand at (0.67, 1.41, 0)
+        pose.vecPosition[0] = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.67 : 0.67;
+        pose.vecPosition[1] = 1.41;
+        pose.vecPosition[2] = 0.0;
+        pose.qRotation.w = 1.0;
+        pose.qRotation.x = 0.0;
+        pose.qRotation.y = 0.0;
+        pose.qRotation.z = 0.0;
+        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, pose, sizeof(vr::DriverPose_t));
+    }
+
     // Start input update thread
     m_inputThread = std::jthread([this](std::stop_token st) {
         while (!st.stop_requested())
