@@ -1,9 +1,11 @@
 #include "controller_device_driver.h"
-#include <cmath>
 
-ControllerDriver::ControllerDriver(vr::ETrackedControllerRole role, mpsc::Receiver<ControllerInput> inputReceiver)
+ControllerDriver::ControllerDriver(vr::ETrackedControllerRole role,
+                                   mpsc::Receiver<ControllerInput> inputReceiver,
+                                   mpsc::Receiver<Pose> poseReceiver)
     : m_role(role)
     , m_inputReceiver(std::move(inputReceiver))
+    , m_poseReceiver(std::move(poseReceiver))
 {
     if (role == vr::TrackedControllerRole_LeftHand)
     {
@@ -66,7 +68,6 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
         {
             if (auto input = m_inputReceiver.recv())
             {
-                // Update input components
                 vr::VRDriverInput()->UpdateScalarComponent(m_joystickXHandle, input->joystickX, 0);
                 vr::VRDriverInput()->UpdateScalarComponent(m_joystickYHandle, input->joystickY, 0);
                 vr::VRDriverInput()->UpdateBooleanComponent(m_joystickClickHandle, input->joystickClick, 0);
@@ -86,53 +87,35 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
                 vr::VRDriverInput()->UpdateBooleanComponent(m_bTouchHandle, input->bTouch, 0);
                 vr::VRDriverInput()->UpdateBooleanComponent(m_systemClickHandle, input->systemClick, 0);
                 vr::VRDriverInput()->UpdateBooleanComponent(m_menuClickHandle, input->menuClick, 0);
+            }
+            else
+            {
+                break; // Channel closed
+            }
+        }
+    });
 
-                // Build and push pose
+    // Start pose update thread
+    m_poseThread = std::jthread([this](std::stop_token st) {
+        while (!st.stop_requested())
+        {
+            if (auto p = m_poseReceiver.recv())
+            {
                 vr::DriverPose_t pose = {};
                 pose.qWorldFromDriverRotation.w = 1.0;
                 pose.qDriverFromHeadRotation.w = 1.0;
-
-                // Derive position from HMD pose
-                vr::TrackedDevicePose_t hmdPose{};
-                vr::VRServerDriverHost()->GetRawTrackedDevicePoses(0.f, &hmdPose, 1);
-
-                if (hmdPose.bPoseIsValid)
-                {
-                    float hmdX = hmdPose.mDeviceToAbsoluteTracking.m[0][3];
-                    float hmdY = hmdPose.mDeviceToAbsoluteTracking.m[1][3];
-                    float hmdZ = hmdPose.mDeviceToAbsoluteTracking.m[2][3];
-                    float xOffset = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.3f : 0.3f;
-                    pose.vecPosition[0] = hmdX + xOffset;
-                    pose.vecPosition[1] = hmdY - 0.3f;
-                    pose.vecPosition[2] = hmdZ - 0.4f;
-                }
-                else
-                {
-                    float xOffset = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.3f : 0.3f;
-                    pose.vecPosition[0] = xOffset;
-                    pose.vecPosition[1] = 1.0;
-                    pose.vecPosition[2] = -0.4f;
-                }
-
-                // Apply rotation for right controller
-                if (m_role == vr::TrackedControllerRole_RightHand)
-                {
-                    float yaw = input->rightYaw;
-                    float pitch = input->rightPitch;
-                    float cy = std::cos(yaw * 0.5f);
-                    float sy = std::sin(yaw * 0.5f);
-                    float cp = std::cos(pitch * 0.5f);
-                    float sp = std::sin(pitch * 0.5f);
-                    pose.qRotation.w = cp * cy;
-                    pose.qRotation.x = sp * cy;
-                    pose.qRotation.y = cp * sy;
-                    pose.qRotation.z = -sp * sy;
-                }
-                else
+                pose.vecPosition[0] = p->posX;
+                pose.vecPosition[1] = p->posY;
+                pose.vecPosition[2] = p->posZ;
+                pose.qRotation.w = p->rotW;
+                pose.qRotation.x = p->rotX;
+                pose.qRotation.y = p->rotY;
+                pose.qRotation.z = p->rotZ;
+                if (pose.qRotation.w == 0.0 && pose.qRotation.x == 0.0 &&
+                    pose.qRotation.y == 0.0 && pose.qRotation.z == 0.0)
                 {
                     pose.qRotation.w = 1.0;
                 }
-
                 pose.poseIsValid = true;
                 pose.deviceIsConnected = true;
                 pose.result = vr::TrackingResult_Running_OK;
@@ -154,6 +137,11 @@ void ControllerDriver::Deactivate()
     {
         m_inputThread.request_stop();
         m_inputThread.join();
+    }
+    if (m_poseThread.joinable())
+    {
+        m_poseThread.request_stop();
+        m_poseThread.join();
     }
     m_deviceIndex = vr::k_unTrackedDeviceIndexInvalid;
 }

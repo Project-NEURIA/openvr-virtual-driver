@@ -2,13 +2,17 @@
 
 SocketManager::SocketManager(
     mpsc::Sender<Position> positionSender,
-    mpsc::Sender<ControllerInput> leftControllerSender,
-    mpsc::Sender<ControllerInput> rightControllerSender,
+    mpsc::Sender<ControllerInput> leftControllerInputSender,
+    mpsc::Sender<ControllerInput> rightControllerInputSender,
+    mpsc::Sender<Pose> leftHandPoseSender,
+    mpsc::Sender<Pose> rightHandPoseSender,
     TrackerSenders trackerSenders
 ) :
     m_positionSender(std::move(positionSender)),
-    m_leftControllerSender(std::move(leftControllerSender)),
-    m_rightControllerSender(std::move(rightControllerSender)),
+    m_leftControllerInputSender(std::move(leftControllerInputSender)),
+    m_rightControllerInputSender(std::move(rightControllerInputSender)),
+    m_leftHandPoseSender(std::move(leftHandPoseSender)),
+    m_rightHandPoseSender(std::move(rightHandPoseSender)),
     m_trackerSenders(std::move(trackerSenders)),
     listenSocket(INVALID_SOCKET),
     clientSocket(INVALID_SOCKET)
@@ -99,8 +103,8 @@ void SocketManager::Receive(std::stop_token st)
             if (bytes <= 0)
                 break;
 
-            m_leftControllerSender.send(input);
-            m_rightControllerSender.send(input);
+            m_leftControllerInputSender.send(input);
+            m_rightControllerInputSender.send(input);
         }
         else if (msgHeader.type == MsgType::BodyPose && msgHeader.size == sizeof(BodyPose))
         {
@@ -109,6 +113,11 @@ void SocketManager::Receive(std::stop_token st)
             if (bytes <= 0)
                 break;
 
+            // Send hand poses to controllers
+            m_leftHandPoseSender.send(bodyPose.leftHand);
+            m_rightHandPoseSender.send(bodyPose.rightHand);
+
+            // Send tracker poses
             m_trackerSenders.waist.send(bodyPose.waist);
             m_trackerSenders.chest.send(bodyPose.chest);
             m_trackerSenders.leftFoot.send(bodyPose.leftFoot);
