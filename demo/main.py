@@ -178,6 +178,32 @@ def main():
     # Right controller rotation
     right_yaw, right_pitch = 0.0, 0.0
 
+    # Send initial T-pose and HMD position
+    send_position(conn, pos_x, pos_y, pos_z, 1.0, 0.0, 0.0, 0.0)
+    send_controller(conn,
+        joystick_x=0.0, joystick_y=0.0, joystick_click=False, joystick_touch=False,
+        trigger=0.0, trigger_click=False, trigger_touch=False,
+        grip=0.0, grip_click=False, grip_touch=False,
+        a_click=False, a_touch=False, b_click=False, b_touch=False,
+        system_click=False, menu_click=False,
+        right_yaw=0.0, right_pitch=0.0)
+    initial_body_pose = {
+        'waist': (pos_x, 0.93, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'chest': (pos_x, 1.29, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'left_shoulder': (pos_x - 0.15, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'right_shoulder': (pos_x + 0.15, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'left_elbow': (pos_x - 0.45, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'right_elbow': (pos_x + 0.45, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'left_hand': (pos_x - 0.67, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'right_hand': (pos_x + 0.67, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'left_knee': (pos_x - 0.09, 0.46, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'right_knee': (pos_x + 0.09, 0.46, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'left_foot': (pos_x - 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
+        'right_foot': (pos_x + 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
+    }
+    send_body_pose(conn, initial_body_pose)
+    print("Initial T-pose sent.")
+
     # Animation timing
     last_time = time.time()
 
@@ -188,6 +214,9 @@ def main():
             current_time = time.time()
             delta_time = current_time - last_time
             last_time = current_time
+
+            # Track if position changed this frame (for T-pose body sync)
+            position_changed = False
 
             # Handle pygame events
             for event in pygame.event.get():
@@ -239,6 +268,7 @@ def main():
                             # Convert to quaternion and send
                             qw, qx, qy, qz = euler_to_quaternion(yaw, pitch)
                             send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
+                            position_changed = True
 
                             print(f"Rotation: yaw={math.degrees(yaw):.1f}° pitch={math.degrees(pitch):.1f}°")
 
@@ -273,6 +303,7 @@ def main():
                 # Send updated position
                 qw, qx, qy, qz = euler_to_quaternion(yaw, pitch)
                 send_position(conn, pos_x, pos_y, pos_z, qw, qx, qy, qz)
+                position_changed = True
 
             # Handle controller inputs
             # Key mappings:
@@ -312,8 +343,8 @@ def main():
                 # Get body pose for trackers (current frame, even if paused)
                 body_pose = vmd_player.get_body_pose(base_position=(pos_x, 0.0, pos_z))
                 send_body_pose(conn, body_pose)
-            else:
-                # Send T-pose by default (matching VMD player skeleton)
+            elif position_changed:
+                # Send T-pose only when position/rotation changed
                 # Hip at 0.93m, chest higher, shorter upper arms
                 # Rotate body with yaw
                 cos_yaw = math.cos(yaw)
