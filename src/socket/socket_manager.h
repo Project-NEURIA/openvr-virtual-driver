@@ -110,8 +110,10 @@ class SocketManager
 public:
     SocketManager(
         mpsc::Sender<Position> positionSender,
-        mpsc::Sender<ControllerInput> leftControllerSender,
-        mpsc::Sender<ControllerInput> rightControllerSender,
+        mpsc::Sender<ControllerInput> leftControllerInputSender,
+        mpsc::Sender<ControllerInput> rightControllerInputSender,
+        mpsc::Sender<Pose> leftHandPoseSender,
+        mpsc::Sender<Pose> rightHandPoseSender,
         TrackerSenders trackerSenders
     );
     ~SocketManager();
@@ -124,8 +126,10 @@ private:
 
     // Channel senders
     mpsc::Sender<Position> m_positionSender;
-    mpsc::Sender<ControllerInput> m_leftControllerSender;
-    mpsc::Sender<ControllerInput> m_rightControllerSender;
+    mpsc::Sender<ControllerInput> m_leftControllerInputSender;
+    mpsc::Sender<ControllerInput> m_rightControllerInputSender;
+    mpsc::Sender<Pose> m_leftHandPoseSender;
+    mpsc::Sender<Pose> m_rightHandPoseSender;
     TrackerSenders m_trackerSenders;
 
     SOCKET listenSocket;

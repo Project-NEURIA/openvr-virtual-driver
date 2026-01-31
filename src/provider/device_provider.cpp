@@ -11,9 +11,13 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
     // Create channels for position (HMD)
     auto [positionSender, positionReceiver] = mpsc::channel<Position>();
 
-    // Create channels for controllers
-    auto [leftControllerSender, leftControllerReceiver] = mpsc::channel<ControllerInput>();
-    auto [rightControllerSender, rightControllerReceiver] = mpsc::channel<ControllerInput>();
+    // Create channels for controller inputs
+    auto [leftControllerInputTx, leftControllerInputRx] = mpsc::channel<ControllerInput>();
+    auto [rightControllerInputTx, rightControllerInputRx] = mpsc::channel<ControllerInput>();
+
+    // Create channels for hand poses (from BodyPose)
+    auto [leftHandPoseTx, leftHandPoseRx] = mpsc::channel<Pose>();
+    auto [rightHandPoseTx, rightHandPoseRx] = mpsc::channel<Pose>();
 
     // Create channels for trackers
     auto [waistTx, waistRx] = mpsc::channel<Pose>();
@@ -30,8 +34,10 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
     // Create socket manager with all senders
     m_pSocketManager = std::make_unique<SocketManager>(
         std::move(positionSender),
-        std::move(leftControllerSender),
-        std::move(rightControllerSender),
+        std::move(leftControllerInputTx),
+        std::move(rightControllerInputTx),
+        std::move(leftHandPoseTx),
+        std::move(rightHandPoseTx),
         TrackerSenders{
             std::move(waistTx),
             std::move(chestTx),
@@ -60,7 +66,8 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
     // Add left controller
     m_pLeftController = std::make_unique<ControllerDriver>(
         vr::TrackedControllerRole_LeftHand,
-        std::move(leftControllerReceiver)
+        std::move(leftControllerInputRx),
+        std::move(leftHandPoseRx)
     );
     if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
             m_pLeftController->GetSerialNumber(),
@@ -73,7 +80,8 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
     // Add right controller
     m_pRightController = std::make_unique<ControllerDriver>(
         vr::TrackedControllerRole_RightHand,
-        std::move(rightControllerReceiver)
+        std::move(rightControllerInputRx),
+        std::move(rightHandPoseRx)
     );
     if (!vr::VRServerDriverHost()->TrackedDeviceAdded(
             m_pRightController->GetSerialNumber(),

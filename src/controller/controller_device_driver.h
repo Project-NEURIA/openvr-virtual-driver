@@ -9,7 +9,9 @@
 class ControllerDriver : public vr::ITrackedDeviceServerDriver
 {
 public:
-    ControllerDriver(vr::ETrackedControllerRole role, mpsc::Receiver<ControllerInput> inputReceiver);
+    ControllerDriver(vr::ETrackedControllerRole role,
+                     mpsc::Receiver<ControllerInput> inputReceiver,
+                     mpsc::Receiver<Pose> poseReceiver);
     ~ControllerDriver() = default;
 
     // ITrackedDeviceServerDriver interface
@@ -54,4 +56,8 @@ private:
     // Input channel
     mpsc::Receiver<ControllerInput> m_inputReceiver;
     std::jthread m_inputThread;
+
+    // Pose channel
+    mpsc::Receiver<Pose> m_poseReceiver;
+    std::jthread m_poseThread;
 };

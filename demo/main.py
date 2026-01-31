@@ -18,6 +18,11 @@ from vmd_parser import VMDPlayer
 #                      grip (float), grip_click, grip_touch,
 #                      a_click, a_touch, b_click, b_touch, system_click, menu_click (all uint8),
 #                      right_yaw, right_pitch (floats)
+# BodyPose (type=3): 12 Pose structs (see below)
+#
+# All positions are absolute world coordinates. Clients should send Position, Controller,
+# and BodyPose at 60-90Hz for smooth tracking. The driver updates SteamVR immediately upon
+# receiving data - there is no internal polling/interpolation.
 
 MSG_HEADER_SIZE = 8
 FRAME_INFO_SIZE = 12
@@ -310,19 +315,32 @@ def main():
             else:
                 # Send T-pose by default (matching VMD player skeleton)
                 # Hip at 0.93m, chest higher, shorter upper arms
+                # Rotate body with yaw
+                cos_yaw = math.cos(yaw)
+                sin_yaw = math.sin(yaw)
+
+                def rotated_pos(offset_x, height, offset_z=0.0):
+                    """Rotate offset by yaw and add to player position."""
+                    rx = offset_x * cos_yaw - offset_z * sin_yaw
+                    rz = offset_x * sin_yaw + offset_z * cos_yaw
+                    return (pos_x + rx, height, pos_z + rz)
+
+                # Body rotation quaternion (yaw only)
+                qw, qx, qy, qz = euler_to_quaternion(yaw, 0.0)
+
                 body_pose = {
-                    'waist': (pos_x, 0.93, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'chest': (pos_x, 1.29, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'left_shoulder': (pos_x - 0.15, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'right_shoulder': (pos_x + 0.15, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'left_elbow': (pos_x - 0.45, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'right_elbow': (pos_x + 0.45, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'left_hand': (pos_x - 0.67, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'right_hand': (pos_x + 0.67, 1.41, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'left_knee': (pos_x - 0.09, 0.46, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'right_knee': (pos_x + 0.09, 0.46, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'left_foot': (pos_x - 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
-                    'right_foot': (pos_x + 0.09, 0.06, pos_z, 1.0, 0.0, 0.0, 0.0),
+                    'waist': (*rotated_pos(0.0, 0.93), qw, qx, qy, qz),
+                    'chest': (*rotated_pos(0.0, 1.29), qw, qx, qy, qz),
+                    'left_shoulder': (*rotated_pos(-0.15, 1.41), qw, qx, qy, qz),
+                    'right_shoulder': (*rotated_pos(0.15, 1.41), qw, qx, qy, qz),
+                    'left_elbow': (*rotated_pos(-0.45, 1.41), qw, qx, qy, qz),
+                    'right_elbow': (*rotated_pos(0.45, 1.41), qw, qx, qy, qz),
+                    'left_hand': (*rotated_pos(-0.67, 1.41), qw, qx, qy, qz),
+                    'right_hand': (*rotated_pos(0.67, 1.41), qw, qx, qy, qz),
+                    'left_knee': (*rotated_pos(-0.09, 0.46), qw, qx, qy, qz),
+                    'right_knee': (*rotated_pos(0.09, 0.46), qw, qx, qy, qz),
+                    'left_foot': (*rotated_pos(-0.09, 0.06), qw, qx, qy, qz),
+                    'right_foot': (*rotated_pos(0.09, 0.06), qw, qx, qy, qz),
                 }
                 send_body_pose(conn, body_pose)
 
