@@ -3,7 +3,7 @@
 */
 
 #include <openvr_driver.h>
-#include "device_provider.h"
+#include "provider/device_provider.h"
 
 AIVRDeviceProvider g_deviceProvider;
 

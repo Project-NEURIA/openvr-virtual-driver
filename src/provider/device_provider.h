@@ -3,9 +3,9 @@
 #include <openvr_driver.h>
 #include <memory>
 #include <array>
-#include "hmd_device_driver.h"
-#include "controller_device_driver.h"
-#include "tracker_device_driver.h"
+#include "../hmd/hmd_device_driver.h"
+#include "../controller/controller_device_driver.h"
+#include "../tracker/tracker_device_driver.h"
 
 class AIVRDeviceProvider : public vr::IServerTrackedDeviceProvider
 {

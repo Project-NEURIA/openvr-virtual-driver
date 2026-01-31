@@ -85,14 +85,14 @@ void SocketManager::Receive(std::stop_token st)
         MsgHeader msgHeader;
         int bytes = recv(clientSocket, reinterpret_cast<char*>(&msgHeader), sizeof(msgHeader), MSG_WAITALL);
         if (bytes <= 0)
-            break;  // Connection lost
+            break;
 
         if (msgHeader.type == MsgType::Position && msgHeader.size == sizeof(Position))
         {
             Position position;
             bytes = recv(clientSocket, reinterpret_cast<char*>(&position), sizeof(Position), MSG_WAITALL);
             if (bytes <= 0)
-                break;  // Connection lost
+                break;
 
             std::unique_lock lock(mtx);
             pos.push_back(position);
@@ -103,7 +103,7 @@ void SocketManager::Receive(std::stop_token st)
             ControllerInput input;
             bytes = recv(clientSocket, reinterpret_cast<char*>(&input), sizeof(ControllerInput), MSG_WAITALL);
             if (bytes <= 0)
-                break;  // Connection lost
+                break;
 
             std::unique_lock lock(mtx);
             controllerInputs.push_back(input);
@@ -114,7 +114,7 @@ void SocketManager::Receive(std::stop_token st)
             BodyPose bodyPose;
             bytes = recv(clientSocket, reinterpret_cast<char*>(&bodyPose), sizeof(BodyPose), MSG_WAITALL);
             if (bytes <= 0)
-                break;  // Connection lost
+                break;
 
             std::unique_lock lock(mtx);
             bodyPoses.push_back(bodyPose);

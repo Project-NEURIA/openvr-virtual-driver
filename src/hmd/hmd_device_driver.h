@@ -9,7 +9,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
-#include "socket_manager.h"
+#include "../socket/socket_manager.h"
 
 using Microsoft::WRL::ComPtr;
 

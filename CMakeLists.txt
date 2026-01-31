@@ -14,11 +14,11 @@ set(DRIVER_NAME "openvr_virtual_driver")
 # Source files
 add_library(driver_${DRIVER_NAME} SHARED
     src/hmd_driver_factory.cpp
-    src/device_provider.cpp
-    src/hmd_device_driver.cpp
-    src/controller_device_driver.cpp
-    src/tracker_device_driver.cpp
-    src/socket_manager.cpp
+    src/provider/device_provider.cpp
+    src/hmd/hmd_device_driver.cpp
+    src/controller/controller_device_driver.cpp
+    src/tracker/tracker_device_driver.cpp
+    src/socket/socket_manager.cpp
 )
 
 target_include_directories(driver_${DRIVER_NAME} PRIVATE

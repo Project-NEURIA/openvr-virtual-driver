@@ -5,7 +5,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
-#include "socket_manager.h"
+#include "../socket/socket_manager.h"
 
 class ControllerDriver : public vr::ITrackedDeviceServerDriver
 {
