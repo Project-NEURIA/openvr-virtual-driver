@@ -44,7 +44,7 @@ jobs:
       run: |
         VERSION="${{ github.ref_name }}"
         VERSION="${VERSION#v}"  # Remove 'v' prefix
-        sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" client/src/__init__.py
+        sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" client/ovd_client/__init__.py
 
     - name: Build package
       run: |

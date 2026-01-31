@@ -1,9 +1,7 @@
 import os
-import sys
 
-# Add client/src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
-from client import Client
+# Add client to path
+from ovd_client import Client
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 
