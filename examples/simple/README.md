@@ -1,0 +1,1 @@
+p to dance, r to reset. wasd to move. 1234 maps to controllers.
