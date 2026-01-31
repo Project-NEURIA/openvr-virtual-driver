@@ -13,4 +13,5 @@ __pycache__/
 # IDE
 .vs/
 .vscode/
+.idea/
 *.user
