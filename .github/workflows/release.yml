@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-driver:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Configure
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Create zip
+      run: |
+        $version = "${{ github.ref_name }}"
+        Compress-Archive -Path build/openvr_virtual_driver/* -DestinationPath "openvr-virtual-driver-$version.zip"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: driver-zip
+        path: openvr-virtual-driver-*.zip
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Update version from tag
+      run: |
+        VERSION="${{ github.ref_name }}"
+        VERSION="${VERSION#v}"  # Remove 'v' prefix
+        sed -i "s/__version__ = \".*\"/__version__ = \"$VERSION\"/" client/src/__init__.py
+
+    - name: Build package
+      run: |
+        cd client
+        uv build
+
+    - name: Publish to PyPI
+      run: |
+        cd client
+        uv publish --token ${{ secrets.PYPI_API_TOKEN }}
+
+  release:
+    needs: [build-driver, publish-pypi]
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download driver artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: driver-zip
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: openvr-virtual-driver-*.zip
+        generate_release_notes: true
