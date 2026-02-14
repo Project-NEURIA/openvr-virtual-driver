@@ -3,9 +3,10 @@
 #include <optional>
 #include <expected>
 #include <string>
+#include <vector>
+#include <memory>
 #include <thread>
 #include <mutex>
-#include <atomic>
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <winsock2.h>
@@ -15,7 +16,15 @@
 enum class MsgType : uint32_t {
     Frame = 0,
     BodyPosition = 1,
-    Controller = 2
+    Controller = 2,
+    FrameStart = 3,
+    FrameStop = 4
+};
+
+struct ClientConnection {
+    SOCKET socket;
+    std::jthread receiverThread;
+    bool streaming = false;
 };
 
 struct MsgHeader {
@@ -118,7 +127,7 @@ public:
 
 private:
     void Connect(std::stop_token st);
-    void Receive(std::stop_token st);
+    void Receive(std::stop_token st, ClientConnection* client);
 
     // Channel senders
     mpsc::Sender<Pose> m_headPoseSender;
@@ -129,10 +138,8 @@ private:
     TrackerSenders m_trackerSenders;
 
     SOCKET listenSocket;
-    SOCKET clientSocket;
 
     std::jthread connectionThread;
-    std::jthread receiverThread;
-    std::atomic<bool> connected{false};
-    std::mutex sendMtx;
+    std::vector<std::unique_ptr<ClientConnection>> m_clients;
+    std::mutex m_clientsMtx;
 };

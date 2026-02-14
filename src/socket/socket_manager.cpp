@@ -14,13 +14,19 @@ SocketManager::SocketManager(
     m_leftHandPoseSender(std::move(leftHandPoseSender)),
     m_rightHandPoseSender(std::move(rightHandPoseSender)),
     m_trackerSenders(std::move(trackerSenders)),
-    listenSocket(INVALID_SOCKET),
-    clientSocket(INVALID_SOCKET)
+    listenSocket(INVALID_SOCKET)
 {}
 
 SocketManager::~SocketManager()
 {
-    closesocket(clientSocket);
+    {
+        std::lock_guard<std::mutex> lock(m_clientsMtx);
+        for (auto& client : m_clients)
+        {
+            closesocket(client->socket);
+        }
+        m_clients.clear();
+    }
     closesocket(listenSocket);
     WSACleanup();
 }
@@ -63,38 +69,45 @@ void SocketManager::Connect(std::stop_token st)
 {
     while (!st.stop_requested())
     {
-        clientSocket = accept(listenSocket, nullptr, nullptr);
-        if (clientSocket == INVALID_SOCKET)
+        SOCKET newSocket = accept(listenSocket, nullptr, nullptr);
+        if (newSocket == INVALID_SOCKET)
             continue;
 
-        connected = true;
-
-        receiverThread = std::jthread([this](std::stop_token st) { Receive(st); });
-        receiverThread.join();
-
-        connected = false;
-        closesocket(clientSocket);
-        clientSocket = INVALID_SOCKET;
+        std::lock_guard<std::mutex> lock(m_clientsMtx);
+        auto client = std::make_unique<ClientConnection>();
+        client->socket = newSocket;
+        auto* clientPtr = client.get();
+        client->receiverThread = std::jthread([this, clientPtr](std::stop_token st) {
+            Receive(st, clientPtr);
+        });
+        m_clients.push_back(std::move(client));
     }
 }
 
-void SocketManager::Receive(std::stop_token st)
+void SocketManager::Receive(std::stop_token st, ClientConnection* client)
 {
-    while (!st.stop_requested() && connected)
+    while (!st.stop_requested())
     {
         MsgHeader msgHeader;
-        int bytes = recv(clientSocket, reinterpret_cast<char*>(&msgHeader), sizeof(msgHeader), MSG_WAITALL);
+        int bytes = recv(client->socket, reinterpret_cast<char*>(&msgHeader), sizeof(msgHeader), MSG_WAITALL);
         if (bytes <= 0)
             break;
 
-        if (msgHeader.type == MsgType::BodyPosition && msgHeader.size == sizeof(BodyPosition))
+        if (msgHeader.type == MsgType::FrameStart && msgHeader.size == 0)
+        {
+            client->streaming = true;
+        }
+        else if (msgHeader.type == MsgType::FrameStop && msgHeader.size == 0)
+        {
+            client->streaming = false;
+        }
+        else if (msgHeader.type == MsgType::BodyPosition && msgHeader.size == sizeof(BodyPosition))
         {
             BodyPosition bodyPos;
-            bytes = recv(clientSocket, reinterpret_cast<char*>(&bodyPos), sizeof(BodyPosition), MSG_WAITALL);
+            bytes = recv(client->socket, reinterpret_cast<char*>(&bodyPos), sizeof(BodyPosition), MSG_WAITALL);
             if (bytes <= 0)
                 break;
 
-            // Send poses only if not null (all zeros means skip update)
             if (!bodyPos.head.isNull())
                 m_headPoseSender.send(bodyPos.head);
             if (!bodyPos.leftHand.isNull())
@@ -125,7 +138,7 @@ void SocketManager::Receive(std::stop_token st)
         else if (msgHeader.type == MsgType::Controller && msgHeader.size == sizeof(ControllerInput))
         {
             ControllerInput input;
-            bytes = recv(clientSocket, reinterpret_cast<char*>(&input), sizeof(ControllerInput), MSG_WAITALL);
+            bytes = recv(client->socket, reinterpret_cast<char*>(&input), sizeof(ControllerInput), MSG_WAITALL);
             if (bytes <= 0)
                 break;
 
@@ -133,33 +146,59 @@ void SocketManager::Receive(std::stop_token st)
             m_rightControllerInputSender.send(input);
         }
     }
+
+    // Client disconnected — remove from list
+    std::lock_guard<std::mutex> lock(m_clientsMtx);
+    closesocket(client->socket);
+    std::erase_if(m_clients, [client](const std::unique_ptr<ClientConnection>& c) {
+        return c.get() == client;
+    });
 }
 
 bool SocketManager::SendFrame(const Frame& frame)
 {
-    if (!connected)
-        return false;
+    std::lock_guard<std::mutex> lock(m_clientsMtx);
 
-    std::lock_guard<std::mutex> lock(sendMtx);
+    if (m_clients.empty())
+        return false;
 
     uint32_t pixelDataSize = frame.width * frame.height * 4;
-
     MsgHeader msgHeader { MsgType::Frame, static_cast<uint32_t>(12 + pixelDataSize) };
-    if (send(clientSocket, reinterpret_cast<const char*>(&msgHeader), sizeof(msgHeader), 0) == SOCKET_ERROR)
-    {
-        return false;
-    }
-
     uint32_t frameInfo[3] = { frame.width, frame.height, frame.eye };
-    if (send(clientSocket, reinterpret_cast<const char*>(frameInfo), sizeof(frameInfo), 0) == SOCKET_ERROR)
+
+    bool anySent = false;
+
+    for (auto it = m_clients.begin(); it != m_clients.end(); )
     {
-        return false;
+        if (!(*it)->streaming)
+        {
+            ++it;
+            continue;
+        }
+
+        SOCKET sock = (*it)->socket;
+        bool failed = false;
+
+        if (send(sock, reinterpret_cast<const char*>(&msgHeader), sizeof(msgHeader), 0) == SOCKET_ERROR)
+            failed = true;
+
+        if (!failed && send(sock, reinterpret_cast<const char*>(frameInfo), sizeof(frameInfo), 0) == SOCKET_ERROR)
+            failed = true;
+
+        if (!failed && send(sock, reinterpret_cast<const char*>(frame.data), pixelDataSize, 0) == SOCKET_ERROR)
+            failed = true;
+
+        if (failed)
+        {
+            closesocket(sock);
+            it = m_clients.erase(it);
+        }
+        else
+        {
+            anySent = true;
+            ++it;
+        }
     }
 
-    if (send(clientSocket, reinterpret_cast<const char*>(frame.data), pixelDataSize, 0) == SOCKET_ERROR)
-    {
-        return false;
-    }
-
-    return true;
+    return anySent;
 }

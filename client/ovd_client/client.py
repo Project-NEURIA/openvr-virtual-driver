@@ -16,6 +16,8 @@ from .vmd import VMDPlayer
 MSG_TYPE_FRAME = 0
 MSG_TYPE_BODY_POSITION = 1
 MSG_TYPE_CONTROLLER = 2
+MSG_TYPE_FRAME_START = 3
+MSG_TYPE_FRAME_STOP = 4
 
 MSG_HEADER_SIZE = 8
 FRAME_INFO_SIZE = 12
@@ -110,6 +112,14 @@ class Client:
                 raise ConnectionError("Connection closed")
             data += chunk
         return data
+
+    def start_frame_stream(self) -> None:
+        """Tell the driver to start sending frame data to this client."""
+        self._send(MSG_TYPE_FRAME_START, b"")
+
+    def stop_frame_stream(self) -> None:
+        """Tell the driver to stop sending frame data to this client."""
+        self._send(MSG_TYPE_FRAME_STOP, b"")
 
     def update_controller(
         self,
@@ -261,6 +271,7 @@ class Client:
 
         last_time = time.time()
 
+        self.start_frame_stream()
         running = True
         try:
             while running:
@@ -389,6 +400,10 @@ class Client:
         except KeyboardInterrupt:
             print("Interrupted")
         finally:
+            try:
+                self.stop_frame_stream()
+            except Exception:
+                pass
             if audio_loaded:
                 pygame.mixer.music.stop()
                 pygame.mixer.quit()
