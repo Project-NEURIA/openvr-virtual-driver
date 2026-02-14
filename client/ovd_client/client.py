@@ -3,8 +3,9 @@ import os
 import socket
 import struct
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Optional
+from typing import Generator, Optional
 
 import numpy as np
 import pygame
@@ -120,6 +121,29 @@ class Client:
     def stop_frame_stream(self) -> None:
         """Tell the driver to stop sending frame data to this client."""
         self._send(MSG_TYPE_FRAME_STOP, b"")
+
+    @contextmanager
+    def frame_stream(self) -> Generator:
+        """Context manager that enables frame streaming.
+
+        Usage:
+            with client.frame_stream() as frames:
+                for frame in frames:
+                    process(frame)
+        """
+        self.start_frame_stream()
+        try:
+            yield self._frame_iter()
+        finally:
+            try:
+                self.stop_frame_stream()
+            except Exception:
+                pass
+
+    def _frame_iter(self) -> Generator[Frame, None, None]:
+        """Yield frames from the driver indefinitely."""
+        while True:
+            yield self.get_frame()
 
     def update_controller(
         self,
@@ -271,139 +295,137 @@ class Client:
 
         last_time = time.time()
 
-        self.start_frame_stream()
         running = True
         try:
-            while running:
-                current_time = time.time()
-                delta_time = current_time - last_time
-                last_time = current_time
+            with self.frame_stream() as frames:
+                for frame in frames:
+                    if not running:
+                        break
 
-                position_changed = False
+                    current_time = time.time()
+                    delta_time = current_time - last_time
+                    last_time = current_time
 
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        running = False
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_ESCAPE:
+                    position_changed = False
+
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
                             running = False
-                        elif event.key == pygame.K_p and vmd_player:
-                            playing = vmd_player.toggle()
-                            if audio_loaded:
-                                if playing:
-                                    pos_ms = int(vmd_player.current_frame / vmd_player.fps * 1000)
-                                    pygame.mixer.music.play(start=pos_ms / 1000.0)
+                        elif event.type == pygame.KEYDOWN:
+                            if event.key == pygame.K_ESCAPE:
+                                running = False
+                            elif event.key == pygame.K_p and vmd_player:
+                                playing = vmd_player.toggle()
+                                if audio_loaded:
+                                    if playing:
+                                        pos_ms = int(vmd_player.current_frame / vmd_player.fps * 1000)
+                                        pygame.mixer.music.play(start=pos_ms / 1000.0)
+                                    else:
+                                        pygame.mixer.music.pause()
+                                print(f"VMD {'Playing' if playing else 'Paused'} at frame {vmd_player.current_frame:.0f}")
+                            elif event.key == pygame.K_r and vmd_player:
+                                vmd_player.reset()
+                                if audio_loaded:
+                                    pygame.mixer.music.stop()
+                                print("VMD Reset to frame 0")
+                        elif event.type == pygame.MOUSEMOTION:
+                            dx, dy = event.rel
+                            if dx != 0 or dy != 0:
+                                keys_now = pygame.key.get_pressed()
+                                if keys_now[pygame.K_BACKQUOTE]:
+                                    right_yaw -= dx * sensitivity
+                                    right_pitch -= dy * sensitivity
+                                    right_pitch = max(-math.pi / 2, min(math.pi / 2, right_pitch))
                                 else:
-                                    pygame.mixer.music.pause()
-                            print(f"VMD {'Playing' if playing else 'Paused'} at frame {vmd_player.current_frame:.0f}")
-                        elif event.key == pygame.K_r and vmd_player:
-                            vmd_player.reset()
-                            if audio_loaded:
-                                pygame.mixer.music.stop()
-                            print("VMD Reset to frame 0")
-                    elif event.type == pygame.MOUSEMOTION:
-                        dx, dy = event.rel
-                        if dx != 0 or dy != 0:
-                            keys_now = pygame.key.get_pressed()
-                            if keys_now[pygame.K_BACKQUOTE]:
-                                right_yaw -= dx * sensitivity
-                                right_pitch -= dy * sensitivity
-                                right_pitch = max(-math.pi / 2, min(math.pi / 2, right_pitch))
-                            else:
-                                yaw -= dx * sensitivity
-                                pitch -= dy * sensitivity
-                                pitch = max(-math.pi / 2 + 0.01, min(math.pi / 2 - 0.01, pitch))
-                                position_changed = True
+                                    yaw -= dx * sensitivity
+                                    pitch -= dy * sensitivity
+                                    pitch = max(-math.pi / 2 + 0.01, min(math.pi / 2 - 0.01, pitch))
+                                    position_changed = True
 
-                # WASD movement
-                keys = pygame.key.get_pressed()
-                move_x, move_z = 0.0, 0.0
-                if keys[pygame.K_w]:
-                    move_z += 1.0
-                if keys[pygame.K_s]:
-                    move_z -= 1.0
-                if keys[pygame.K_a]:
-                    move_x -= 1.0
-                if keys[pygame.K_d]:
-                    move_x += 1.0
+                    # WASD movement
+                    keys = pygame.key.get_pressed()
+                    move_x, move_z = 0.0, 0.0
+                    if keys[pygame.K_w]:
+                        move_z += 1.0
+                    if keys[pygame.K_s]:
+                        move_z -= 1.0
+                    if keys[pygame.K_a]:
+                        move_x -= 1.0
+                    if keys[pygame.K_d]:
+                        move_x += 1.0
 
-                if move_x != 0.0 or move_z != 0.0:
-                    length = math.sqrt(move_x * move_x + move_z * move_z)
-                    move_x /= length
-                    move_z /= length
-                    cos_yaw = math.cos(yaw)
-                    sin_yaw = math.sin(yaw)
-                    world_x = move_x * cos_yaw - move_z * sin_yaw
-                    world_z = move_x * sin_yaw + move_z * cos_yaw
-                    pos_x += world_x * move_speed
-                    pos_z -= world_z * move_speed
-                    position_changed = True
+                    if move_x != 0.0 or move_z != 0.0:
+                        length = math.sqrt(move_x * move_x + move_z * move_z)
+                        move_x /= length
+                        move_z /= length
+                        cos_yaw = math.cos(yaw)
+                        sin_yaw = math.sin(yaw)
+                        world_x = move_x * cos_yaw - move_z * sin_yaw
+                        world_z = move_x * sin_yaw + move_z * cos_yaw
+                        pos_x += world_x * move_speed
+                        pos_z -= world_z * move_speed
+                        position_changed = True
 
-                # Controller inputs
-                trigger = 1.0 if keys[pygame.K_1] else 0.0
-                grip = 1.0 if keys[pygame.K_2] else 0.0
-                a_click = keys[pygame.K_3]
-                b_click = keys[pygame.K_4]
-                joystick_click = keys[pygame.K_5]
-                menu_click = keys[pygame.K_6]
+                    # Controller inputs
+                    trigger = 1.0 if keys[pygame.K_1] else 0.0
+                    grip = 1.0 if keys[pygame.K_2] else 0.0
+                    a_click = keys[pygame.K_3]
+                    b_click = keys[pygame.K_4]
+                    joystick_click = keys[pygame.K_5]
+                    menu_click = keys[pygame.K_6]
 
-                self.update_controller(
-                    trigger=trigger, trigger_click=(trigger > 0.9), trigger_touch=(trigger > 0.0),
-                    grip=grip, grip_click=(grip > 0.9), grip_touch=(grip > 0.0),
-                    a_click=a_click, a_touch=a_click,
-                    b_click=b_click, b_touch=b_click,
-                    joystick_click=joystick_click,
-                    menu_click=menu_click,
-                    right_yaw=right_yaw, right_pitch=right_pitch,
-                )
-
-                # Send body pose: VMD or T-pose
-                if vmd_player and (vmd_player.current_frame > 0 or vmd_player.playing):
-                    if vmd_player.playing:
-                        frames_to_advance = delta_time * vmd_player.fps
-                        vmd_player.advance_frame(frames_to_advance)
-
-                    hx, hy, hz, hw, hqx, hqy, hqz = vmd_player.get_head_transform(base_position=(pos_x, 0.0, pos_z))
-                    body_pos = vmd_player.get_body_pose(base_position=(pos_x, 0.0, pos_z))
-
-                    self.update_pose(
-                        head=Pose(pos_x=hx, pos_y=hy, pos_z=hz, rot_w=hw, rot_x=hqx, rot_y=hqy, rot_z=hqz),
-                        left_hand=self._tuple_to_pose(body_pos.get('left_hand')),
-                        right_hand=self._tuple_to_pose(body_pos.get('right_hand')),
-                        waist=self._tuple_to_pose(body_pos.get('waist')),
-                        chest=self._tuple_to_pose(body_pos.get('chest')),
-                        left_foot=self._tuple_to_pose(body_pos.get('left_foot')),
-                        right_foot=self._tuple_to_pose(body_pos.get('right_foot')),
-                        left_knee=self._tuple_to_pose(body_pos.get('left_knee')),
-                        right_knee=self._tuple_to_pose(body_pos.get('right_knee')),
-                        left_elbow=self._tuple_to_pose(body_pos.get('left_elbow')),
-                        right_elbow=self._tuple_to_pose(body_pos.get('right_elbow')),
-                        left_shoulder=self._tuple_to_pose(body_pos.get('left_shoulder')),
-                        right_shoulder=self._tuple_to_pose(body_pos.get('right_shoulder')),
+                    self.update_controller(
+                        trigger=trigger, trigger_click=(trigger > 0.9), trigger_touch=(trigger > 0.0),
+                        grip=grip, grip_click=(grip > 0.9), grip_touch=(grip > 0.0),
+                        a_click=a_click, a_touch=a_click,
+                        b_click=b_click, b_touch=b_click,
+                        joystick_click=joystick_click,
+                        menu_click=menu_click,
+                        right_yaw=right_yaw, right_pitch=right_pitch,
                     )
-                elif position_changed:
-                    self._send_tpose(pos_x, pos_y, pos_z, yaw, pitch)
 
-                # Receive and display frame
-                frame = self.get_frame()
-                if frame.eye == 0:  # Left eye only
-                    frame_arr = np.frombuffer(frame.data, dtype=np.uint8).reshape((frame.height, frame.width, 4))
-                    rgb_frame = frame_arr[:, :, [2, 1, 0]]  # BGRA to RGB
-                    surface = pygame.surfarray.make_surface(rgb_frame.swapaxes(0, 1))
-                    window_size = screen.get_size()
-                    scaled_surface = pygame.transform.scale(surface, window_size)
-                    screen.blit(scaled_surface, (0, 0))
-                    pygame.display.flip()
+                    # Send body pose: VMD or T-pose
+                    if vmd_player and (vmd_player.current_frame > 0 or vmd_player.playing):
+                        if vmd_player.playing:
+                            frames_to_advance = delta_time * vmd_player.fps
+                            vmd_player.advance_frame(frames_to_advance)
+
+                        hx, hy, hz, hw, hqx, hqy, hqz = vmd_player.get_head_transform(base_position=(pos_x, 0.0, pos_z))
+                        body_pos = vmd_player.get_body_pose(base_position=(pos_x, 0.0, pos_z))
+
+                        self.update_pose(
+                            head=Pose(pos_x=hx, pos_y=hy, pos_z=hz, rot_w=hw, rot_x=hqx, rot_y=hqy, rot_z=hqz),
+                            left_hand=self._tuple_to_pose(body_pos.get('left_hand')),
+                            right_hand=self._tuple_to_pose(body_pos.get('right_hand')),
+                            waist=self._tuple_to_pose(body_pos.get('waist')),
+                            chest=self._tuple_to_pose(body_pos.get('chest')),
+                            left_foot=self._tuple_to_pose(body_pos.get('left_foot')),
+                            right_foot=self._tuple_to_pose(body_pos.get('right_foot')),
+                            left_knee=self._tuple_to_pose(body_pos.get('left_knee')),
+                            right_knee=self._tuple_to_pose(body_pos.get('right_knee')),
+                            left_elbow=self._tuple_to_pose(body_pos.get('left_elbow')),
+                            right_elbow=self._tuple_to_pose(body_pos.get('right_elbow')),
+                            left_shoulder=self._tuple_to_pose(body_pos.get('left_shoulder')),
+                            right_shoulder=self._tuple_to_pose(body_pos.get('right_shoulder')),
+                        )
+                    elif position_changed:
+                        self._send_tpose(pos_x, pos_y, pos_z, yaw, pitch)
+
+                    # Display frame
+                    if frame.eye == 0:  # Left eye only
+                        frame_arr = np.frombuffer(frame.data, dtype=np.uint8).reshape((frame.height, frame.width, 4))
+                        rgb_frame = frame_arr[:, :, [2, 1, 0]]  # BGRA to RGB
+                        surface = pygame.surfarray.make_surface(rgb_frame.swapaxes(0, 1))
+                        window_size = screen.get_size()
+                        scaled_surface = pygame.transform.scale(surface, window_size)
+                        screen.blit(scaled_surface, (0, 0))
+                        pygame.display.flip()
 
         except ConnectionError as e:
             print(f"Connection ended: {e}")
         except KeyboardInterrupt:
             print("Interrupted")
         finally:
-            try:
-                self.stop_frame_stream()
-            except Exception:
-                pass
             if audio_loaded:
                 pygame.mixer.music.stop()
                 pygame.mixer.quit()
