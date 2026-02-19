@@ -149,7 +149,7 @@ class VMDPlayer:
         self.loop = True
 
         # Index keyframes by bone
-        self._keyframes = {}
+        self._keyframes: dict[str, list[BoneKeyframe]] = {}
         for kf in keyframes:
             if kf.bone_name not in self._keyframes:
                 self._keyframes[kf.bone_name] = []
@@ -214,7 +214,7 @@ class VMDPlayer:
     def _compute_bone_world_transforms(self, frame: int) -> dict:
         """Compute world position and rotation for all bones using forward kinematics."""
         # World transform: (position, rotation) where rotation is (w, x, y, z)
-        world_transforms = {}
+        world_transforms: dict[str, tuple[tuple[float, float, float], tuple[float, float, float, float]]] = {}
 
         # Process bones in order (parents before children)
         bone_order = [

@@ -15,6 +15,11 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
+[dependency-groups]
+dev = [
+    "mypy>=1.0.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/Project-NEURIA/openvr-virtual-driver"
 
