@@ -62,7 +62,7 @@ private:
     std::string m_serialNumber = "OVD-HMD-001";
 
     // Display properties
-    int32_t m_renderWidth    = 1920;
+    int32_t m_renderWidth    = 1080;
     int32_t m_renderHeight   = 1080;
     float m_displayFrequency = 90.0f;
     float m_ipd = 0.063f; // 63mm

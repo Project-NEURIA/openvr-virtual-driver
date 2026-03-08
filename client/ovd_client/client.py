@@ -1,6 +1,7 @@
 import socket
 import struct
 from contextlib import contextmanager
+from itertools import chain
 from dataclasses import dataclass
 from typing import Generator, Optional
 
@@ -69,7 +70,7 @@ class Camera:
 
     def __init__(
         self,
-        render_width: int = 1920,
+        render_width: int = 1080,
         render_height: int = 1080,
         proj_left: float = -1.0,
         proj_right: float = 1.0,
@@ -146,6 +147,7 @@ class Client:
         self.port = port
         self._socket: Optional[socket.socket] = None
         self._camera = Camera()
+        self._camera_calibrated = False
 
     def connect(self) -> None:
         """Connect to the driver."""
@@ -165,6 +167,23 @@ class Client:
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
         self.disconnect()
         return False
+
+    def _calibrate_camera(self, frame: Frame) -> None:
+        """Calibrate Camera from the first received frame. Called once automatically."""
+        if self._camera_calibrated:
+            return
+        if (frame.width != self._camera.render_width
+                or frame.height != self._camera.render_height):
+            self._camera = Camera(
+                render_width=frame.width,
+                render_height=frame.height,
+                proj_left=self._camera.proj_left,
+                proj_right=self._camera.proj_right,
+                proj_top=self._camera.proj_top,
+                proj_bottom=self._camera.proj_bottom,
+                ipd=self._camera.ipd,
+            )
+        self._camera_calibrated = True
 
     def get_intrinsics(self) -> NDArray[np.float64]:
         """Return the 3x3 camera intrinsics matrix K."""
@@ -214,7 +233,10 @@ class Client:
         """
         self.start_frame_stream()
         try:
-            yield self._frame_iter()
+            # Calibrate camera from first frame
+            first = self.get_frame()
+            self._calibrate_camera(first)
+            yield chain((first,), self._frame_iter())
         finally:
             try:
                 self.stop_frame_stream()

@@ -60,13 +60,23 @@ echo.
 :: Close SteamVR if running
 tasklist /FI "IMAGENAME eq vrserver.exe" 2>nul | find /I "vrserver.exe" >nul
 if not errorlevel 1 (
-    echo SteamVR is running. Closing it...
+    echo SteamVR is running. Shutting it down gracefully...
+    :: Send close signal to vrmonitor (the UI process that orchestrates clean shutdown)
+    taskkill /IM vrmonitor.exe >nul 2>&1
+    :: Wait up to 10 seconds for SteamVR to shut down cleanly
+    set "WAITED=0"
+    :wait_loop
+    timeout /t 1 /nobreak >nul
+    set /a WAITED+=1
+    tasklist /FI "IMAGENAME eq vrserver.exe" 2>nul | find /I "vrserver.exe" >nul
+    if not errorlevel 1 if !WAITED! lss 10 goto :wait_loop
+    :: Force-kill anything still running as a last resort
     taskkill /IM vrserver.exe /F >nul 2>&1
     taskkill /IM vrmonitor.exe /F >nul 2>&1
     taskkill /IM vrdashboard.exe /F >nul 2>&1
     taskkill /IM vrcompositor.exe /F >nul 2>&1
     taskkill /IM vrwebhelper.exe /F >nul 2>&1
-    timeout /t 3 /nobreak >nul
+    timeout /t 2 /nobreak >nul
 )
 
 :: Remove the driver
