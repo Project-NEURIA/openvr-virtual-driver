@@ -163,7 +163,7 @@ bool SocketManager::SendFrame(const Frame& frame)
         return false;
 
     uint32_t pixelDataSize = frame.width * frame.height * 4;
-    MsgHeader msgHeader { MsgType::Frame, static_cast<uint32_t>(12 + pixelDataSize) };
+    MsgHeader msgHeader { MsgType::Frame, static_cast<uint32_t>(12 + sizeof(Pose) + pixelDataSize) };
     uint32_t frameInfo[3] = { frame.width, frame.height, frame.eye };
 
     bool anySent = false;
@@ -183,6 +183,9 @@ bool SocketManager::SendFrame(const Frame& frame)
             failed = true;
 
         if (!failed && send(sock, reinterpret_cast<const char*>(frameInfo), sizeof(frameInfo), 0) == SOCKET_ERROR)
+            failed = true;
+
+        if (!failed && send(sock, reinterpret_cast<const char*>(&frame.pose), sizeof(Pose), 0) == SOCKET_ERROR)
             failed = true;
 
         if (!failed && send(sock, reinterpret_cast<const char*>(frame.data), pixelDataSize, 0) == SOCKET_ERROR)

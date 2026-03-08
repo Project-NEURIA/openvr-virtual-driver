@@ -4,6 +4,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Generator, Optional
 
+import numpy as np
+from numpy.typing import NDArray
+
 
 # Protocol constants
 MSG_TYPE_FRAME = 0
@@ -57,7 +60,82 @@ class Frame:
     width: int
     height: int
     eye: int  # 0 = left, 1 = right
+    pose: Pose
     data: bytes
+
+
+class Camera:
+    """Computes per-eye camera intrinsics & extrinsics for the virtual HMD."""
+
+    def __init__(
+        self,
+        render_width: int = 1920,
+        render_height: int = 1080,
+        proj_left: float = -1.0,
+        proj_right: float = 1.0,
+        proj_top: float = -1.0,
+        proj_bottom: float = 1.0,
+        ipd: float = 0.063,
+    ) -> None:
+        self.render_width = render_width
+        self.render_height = render_height
+        self.proj_left = proj_left
+        self.proj_right = proj_right
+        self.proj_top = proj_top
+        self.proj_bottom = proj_bottom
+        self.ipd = ipd
+
+        # Pre-compute intrinsics (static for a given HMD configuration)
+        fx = render_width / (proj_right - proj_left)
+        fy = render_height / (proj_bottom - proj_top)
+        cx = -proj_left * render_width / (proj_right - proj_left)
+        cy = -proj_top * render_height / (proj_bottom - proj_top)
+        self._intrinsics = np.array([
+            [fx, 0.0, cx],
+            [0.0, fy, cy],
+            [0.0, 0.0, 1.0],
+        ], dtype=np.float64)
+
+    @property
+    def intrinsics(self) -> NDArray[np.float64]:
+        """3x3 camera intrinsics matrix K (static, does not change with pose)."""
+        return self._intrinsics.copy()
+
+    def extrinsics(self, pose: "Pose", eye: int = 0) -> NDArray[np.float64]:
+        """4x4 world-to-camera extrinsics matrix for the given head pose and eye.
+
+        Args:
+            pose: Current head pose (position + quaternion).
+            eye: 0 = left eye, 1 = right eye.
+
+        Returns:
+            4x4 extrinsics matrix T (world-to-camera transform).
+        """
+        # Head-to-world: rotation from quaternion + translation
+        R = _quat_to_rotation_matrix(pose.rot_w, pose.rot_x, pose.rot_y, pose.rot_z)
+        t = np.array([pose.pos_x, pose.pos_y, pose.pos_z])
+
+        # Eye offset along the head's local X axis
+        eye_offset_x = (-0.5 if eye == 0 else 0.5) * self.ipd
+        t_eye = t + R[:, 0] * eye_offset_x
+
+        # Build world-to-eye transform (inverse of eye-to-world)
+        T = np.eye(4, dtype=np.float64)
+        T[:3, :3] = R.T
+        T[:3, 3] = -R.T @ t_eye
+        return T
+
+
+def _quat_to_rotation_matrix(w: float, x: float, y: float, z: float) -> NDArray[np.float64]:
+    """Convert quaternion (w, x, y, z) to a 3x3 rotation matrix."""
+    ww, xx, yy, zz = w * w, x * x, y * y, z * z
+    wx, wy, wz = w * x, w * y, w * z
+    xy, xz, yz = x * y, x * z, y * z
+    return np.array([
+        [ww + xx - yy - zz, 2 * (xy - wz),     2 * (xz + wy)],
+        [2 * (xy + wz),     ww - xx + yy - zz,  2 * (yz - wx)],
+        [2 * (xz - wy),     2 * (yz + wx),      ww - xx - yy + zz],
+    ], dtype=np.float64)
 
 
 class Client:
@@ -67,6 +145,7 @@ class Client:
         self.host = host
         self.port = port
         self._socket: Optional[socket.socket] = None
+        self._camera = Camera()
 
     def connect(self) -> None:
         """Connect to the driver."""
@@ -87,6 +166,14 @@ class Client:
         self.disconnect()
         return False
 
+    def get_intrinsics(self) -> NDArray[np.float64]:
+        """Return the 3x3 camera intrinsics matrix K."""
+        return self._camera.intrinsics
+
+    def get_extrinsics(self, frame: Frame) -> NDArray[np.float64]:
+        """Return the 4x4 world-to-camera extrinsics matrix for the given frame."""
+        return self._camera.extrinsics(frame.pose, frame.eye)
+
     def _send(self, msg_type: int, data: bytes) -> None:
         """Send a message with header."""
         if self._socket is None:
@@ -98,13 +185,15 @@ class Client:
         """Receive exactly `size` bytes."""
         if self._socket is None:
             raise ConnectionError("Not connected")
-        data = b""
-        while len(data) < size:
-            chunk = self._socket.recv(size - len(data))
-            if not chunk:
+        buf = bytearray(size)
+        view = memoryview(buf)
+        pos = 0
+        while pos < size:
+            n = self._socket.recv_into(view[pos:])
+            if n == 0:
                 raise ConnectionError("Connection closed")
-            data += chunk
-        return data
+            pos += n
+        return bytes(buf)
 
     def start_frame_stream(self) -> None:
         """Tell the driver to start sending frame data to this client."""
@@ -216,7 +305,12 @@ class Client:
         frame_info = self._recv_exact(FRAME_INFO_SIZE)
         width, height, eye = struct.unpack("<III", frame_info)
 
-        pixel_size = msg_size - FRAME_INFO_SIZE
+        pose_data = self._recv_exact(POSE_SIZE)
+        pos_x, pos_y, pos_z, rot_w, rot_x, rot_y, rot_z = struct.unpack("<7f", pose_data)
+        pose = Pose(pos_x=pos_x, pos_y=pos_y, pos_z=pos_z,
+                    rot_w=rot_w, rot_x=rot_x, rot_y=rot_y, rot_z=rot_z)
+
+        pixel_size = msg_size - FRAME_INFO_SIZE - POSE_SIZE
         pixel_data = self._recv_exact(pixel_size)
 
-        return Frame(width=width, height=height, eye=eye, data=pixel_data)
+        return Frame(width=width, height=height, eye=eye, pose=pose, data=pixel_data)

@@ -32,14 +32,17 @@ struct MsgHeader {
     uint32_t size;
 };
 
-struct Frame {
-    const uint8_t* data;
-    uint32_t width;
-    uint32_t height;
-    uint32_t eye;
+#pragma pack(push, 1)
+struct Pose {
+    float posX, posY, posZ;
+    float rotW, rotX, rotY, rotZ;  // quaternion
+
+    bool isNull() const {
+        return posX == 0.0f && posY == 0.0f && posZ == 0.0f &&
+               rotW == 0.0f && rotX == 0.0f && rotY == 0.0f && rotZ == 0.0f;
+    }
 };
 
-#pragma pack(push, 1)
 struct ControllerInput {
     // Joystick
     float joystickX;
@@ -66,16 +69,6 @@ struct ControllerInput {
     float rightPitch;
 };
 
-struct Pose {
-    float posX, posY, posZ;
-    float rotW, rotX, rotY, rotZ;  // quaternion
-
-    bool isNull() const {
-        return posX == 0.0f && posY == 0.0f && posZ == 0.0f &&
-               rotW == 0.0f && rotX == 0.0f && rotY == 0.0f && rotZ == 0.0f;
-    }
-};
-
 struct BodyPosition {
     // HMD
     Pose head;
@@ -95,6 +88,14 @@ struct BodyPosition {
     Pose rightShoulder;
 };
 #pragma pack(pop)
+
+struct Frame {
+    const uint8_t* data;
+    uint32_t width;
+    uint32_t height;
+    uint32_t eye;
+    Pose pose;
+};
 
 struct TrackerSenders
 {
