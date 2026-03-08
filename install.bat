@@ -61,13 +61,25 @@ set "DEST=%STEAMVR_PATH%\drivers\%DRIVER_NAME%"
 echo Found SteamVR at: %STEAMVR_PATH%
 echo.
 
+:: Close SteamVR if running
+tasklist /FI "IMAGENAME eq vrserver.exe" 2>nul | find /I "vrserver.exe" >nul
+if not errorlevel 1 (
+    echo SteamVR is running. Closing it...
+    taskkill /IM vrserver.exe /F >nul 2>&1
+    taskkill /IM vrmonitor.exe /F >nul 2>&1
+    taskkill /IM vrdashboard.exe /F >nul 2>&1
+    taskkill /IM vrcompositor.exe /F >nul 2>&1
+    taskkill /IM vrwebhelper.exe /F >nul 2>&1
+    timeout /t 3 /nobreak >nul
+)
+
 :: Check if driver is already installed
 if exist "%DEST%" (
     echo Existing installation found. Updating...
     rmdir /s /q "%DEST%" 2>nul
     if exist "%DEST%" (
         echo ERROR: Could not remove the existing driver.
-        echo Please close SteamVR and try again.
+        echo A process may still be locking the files. Please try again.
         echo.
         pause
         exit /b 1
@@ -87,7 +99,5 @@ if errorlevel 1 (
 echo.
 echo Installation complete!
 echo Driver installed to: %DEST%
-echo.
-echo Please restart SteamVR if it is running.
 echo.
 pause
