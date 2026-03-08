@@ -1,4 +1,17 @@
 #include "socket_manager.h"
+#include <openvr_driver.h>
+#include <cstdio>
+
+static void Log(const char* fmt, ...)
+{
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    if (vr::VRDriverLog())
+        vr::VRDriverLog()->Log(buf);
+}
 
 SocketManager::SocketManager(
     mpsc::Sender<Pose> headPoseSender,
@@ -19,15 +32,22 @@ SocketManager::SocketManager(
 
 SocketManager::~SocketManager()
 {
+    // Close listen socket first so accept() stops blocking
+    closesocket(listenSocket);
+
+    // Close all client sockets to unblock recv() in Receive threads
     {
         std::lock_guard<std::mutex> lock(m_clientsMtx);
         for (auto& client : m_clients)
         {
-            closesocket(client->socket);
+            if (client->socket != INVALID_SOCKET)
+                closesocket(client->socket);
+            client->socket = INVALID_SOCKET;
         }
-        m_clients.clear();
     }
-    closesocket(listenSocket);
+
+    // Now safe to destroy clients — jthreads will join after recv returns
+    m_clients.clear();
     WSACleanup();
 }
 
@@ -73,7 +93,14 @@ void SocketManager::Connect(std::stop_token st)
         if (newSocket == INVALID_SOCKET)
             continue;
 
+        Log("[OVD] Client connected\n");
         std::lock_guard<std::mutex> lock(m_clientsMtx);
+
+        // Clean up dead clients (socket closed by their Receive thread)
+        std::erase_if(m_clients, [](const std::unique_ptr<ClientConnection>& c) {
+            return c->socket == INVALID_SOCKET;
+        });
+
         auto client = std::make_unique<ClientConnection>();
         client->socket = newSocket;
         auto* clientPtr = client.get();
@@ -91,14 +118,20 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
         MsgHeader msgHeader;
         int bytes = recv(client->socket, reinterpret_cast<char*>(&msgHeader), sizeof(msgHeader), MSG_WAITALL);
         if (bytes <= 0)
+        {
+            int err = WSAGetLastError();
+            Log("[OVD] Client recv header failed: bytes=%d err=%d\n", bytes, err);
             break;
+        }
 
         if (msgHeader.type == MsgType::FrameStart && msgHeader.size == 0)
         {
+            Log("[OVD] Client requested frame stream start\n");
             client->streaming = true;
         }
         else if (msgHeader.type == MsgType::FrameStop && msgHeader.size == 0)
         {
+            Log("[OVD] Client requested frame stream stop\n");
             client->streaming = false;
         }
         else if (msgHeader.type == MsgType::BodyPosition && msgHeader.size == sizeof(BodyPosition))
@@ -106,7 +139,10 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
             BodyPosition bodyPos;
             bytes = recv(client->socket, reinterpret_cast<char*>(&bodyPos), sizeof(BodyPosition), MSG_WAITALL);
             if (bytes <= 0)
+            {
+                Log("[OVD] Client recv body failed: bytes=%d\n", bytes);
                 break;
+            }
 
             if (!bodyPos.head.isNull())
                 m_headPoseSender.send(bodyPos.head);
@@ -140,24 +176,39 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
             ControllerInput input;
             bytes = recv(client->socket, reinterpret_cast<char*>(&input), sizeof(ControllerInput), MSG_WAITALL);
             if (bytes <= 0)
+            {
+                Log("[OVD] Client recv controller failed: bytes=%d\n", bytes);
                 break;
+            }
 
             m_leftControllerInputSender.send(input);
             m_rightControllerInputSender.send(input);
         }
+        else
+        {
+            Log("[OVD] Unknown msg type=%u size=%u, dropping client\n",
+                static_cast<uint32_t>(msgHeader.type), msgHeader.size);
+            break;
+        }
     }
 
-    // Client disconnected — remove from list
-    std::lock_guard<std::mutex> lock(m_clientsMtx);
+    // Client disconnected — close socket and mark for cleanup.
+    // We can't erase ourselves from m_clients here because that would
+    // destroy our own jthread (which tries to join the current thread = UB).
+    Log("[OVD] Client disconnected\n");
     closesocket(client->socket);
-    std::erase_if(m_clients, [client](const std::unique_ptr<ClientConnection>& c) {
-        return c.get() == client;
-    });
+    client->socket = INVALID_SOCKET;
+    client->streaming = false;
 }
 
 bool SocketManager::SendFrame(const Frame& frame)
 {
     std::lock_guard<std::mutex> lock(m_clientsMtx);
+
+    // Clean up dead clients
+    std::erase_if(m_clients, [](const std::unique_ptr<ClientConnection>& c) {
+        return c->socket == INVALID_SOCKET;
+    });
 
     if (m_clients.empty())
         return false;

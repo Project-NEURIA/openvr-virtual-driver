@@ -125,6 +125,11 @@ vr::EVRInitError Driver::Activate(uint32_t unObjectId)
     // Indicate this is not a real display
     vr::VRProperties()->SetBoolProperty(props, vr::Prop_IsOnDesktop_Bool, false);
 
+    // Proximity sensor — always report "worn" to prevent SteamVR standby
+    vr::VRProperties()->SetBoolProperty(props, vr::Prop_ContainsProximitySensor_Bool, true);
+    vr::VRDriverInput()->CreateBooleanComponent(props, "/proximity", &m_proximityHandle);
+    vr::VRDriverInput()->UpdateBooleanComponent(m_proximityHandle, true, 0.0);
+
     // Start pose update thread
     m_poseThread = std::jthread([this](std::stop_token st) { PoseUpdateThreadFunc(st); });
 
