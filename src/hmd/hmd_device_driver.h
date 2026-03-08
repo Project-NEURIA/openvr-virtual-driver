@@ -2,6 +2,7 @@
 
 #include <openvr_driver.h>
 #include <d3d11.h>
+#include <dxgi.h>
 #include <wrl/client.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -76,6 +77,10 @@ private:
     uint32_t m_stagingWidth = 0;
     uint32_t m_stagingHeight = 0;
     DXGI_FORMAT m_stagingFormat = DXGI_FORMAT_UNKNOWN;
+
+    // Sync texture for GPU synchronization
+    vr::SharedTextureHandle_t m_syncTextureHandle = 0;
+    ComPtr<ID3D11Texture2D> m_pSyncTexture;
 
     // Texture management
     struct SwapTextureSetData
