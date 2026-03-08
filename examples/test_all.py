@@ -1,6 +1,7 @@
 """Integration test for ovd_client — requires SteamVR running with the virtual driver."""
 
 import math
+import os
 import struct
 import time
 import sys
@@ -292,6 +293,26 @@ def test_camera_with_frames(client: Client):
         report("Client.get_extrinsics", False, str(e))
 
 
+def test_save_frame(client: Client):
+    print("\n=== Save Frame ===")
+
+    try:
+        import numpy as np
+        from PIL import Image
+
+        with client.frame_stream() as frames:
+            frame = next(frames)
+
+        arr = np.frombuffer(frame.data, dtype=np.uint8).reshape(frame.height, frame.width, 4)
+        img = Image.fromarray(arr, "RGBA")
+        out_dir = os.path.dirname(os.path.abspath(__file__))
+        out_path = os.path.join(out_dir, "frame.png")
+        img.save(out_path)
+        report("Save frame to PNG", True, out_path)
+    except Exception as e:
+        report("Save frame to PNG", False, str(e))
+
+
 def test_pose_movement(client: Client):
     print("\n=== Pose movement sequence ===")
 
@@ -406,6 +427,7 @@ def main():
     run_test("Rapid updates", test_rapid_updates)
     run_test("Frame Streaming", test_frame_stream)
     run_test("Camera with frames", test_camera_with_frames)
+    run_test("Save frame", test_save_frame)
 
     # Summary
     total = PASS + FAIL
