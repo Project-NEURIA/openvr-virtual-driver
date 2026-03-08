@@ -7,6 +7,51 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
+static Pose HmdMatrix34ToPose(const vr::HmdMatrix34_t& mat)
+{
+    Pose p;
+    p.posX = mat.m[0][3];
+    p.posY = mat.m[1][3];
+    p.posZ = mat.m[2][3];
+
+    float trace = mat.m[0][0] + mat.m[1][1] + mat.m[2][2];
+
+    if (trace > 0.0f)
+    {
+        float s = 0.5f / sqrtf(trace + 1.0f);
+        p.rotW = 0.25f / s;
+        p.rotX = (mat.m[2][1] - mat.m[1][2]) * s;
+        p.rotY = (mat.m[0][2] - mat.m[2][0]) * s;
+        p.rotZ = (mat.m[1][0] - mat.m[0][1]) * s;
+    }
+    else if (mat.m[0][0] > mat.m[1][1] && mat.m[0][0] > mat.m[2][2])
+    {
+        float s = 2.0f * sqrtf(1.0f + mat.m[0][0] - mat.m[1][1] - mat.m[2][2]);
+        p.rotW = (mat.m[2][1] - mat.m[1][2]) / s;
+        p.rotX = 0.25f * s;
+        p.rotY = (mat.m[0][1] + mat.m[1][0]) / s;
+        p.rotZ = (mat.m[0][2] + mat.m[2][0]) / s;
+    }
+    else if (mat.m[1][1] > mat.m[2][2])
+    {
+        float s = 2.0f * sqrtf(1.0f + mat.m[1][1] - mat.m[0][0] - mat.m[2][2]);
+        p.rotW = (mat.m[0][2] - mat.m[2][0]) / s;
+        p.rotX = (mat.m[0][1] + mat.m[1][0]) / s;
+        p.rotY = 0.25f * s;
+        p.rotZ = (mat.m[1][2] + mat.m[2][1]) / s;
+    }
+    else
+    {
+        float s = 2.0f * sqrtf(1.0f + mat.m[2][2] - mat.m[0][0] - mat.m[1][1]);
+        p.rotW = (mat.m[1][0] - mat.m[0][1]) / s;
+        p.rotX = (mat.m[0][2] + mat.m[2][0]) / s;
+        p.rotY = (mat.m[1][2] + mat.m[2][1]) / s;
+        p.rotZ = 0.25f * s;
+    }
+
+    return p;
+}
+
 Driver::Driver(mpsc::Receiver<Pose> poseReceiver, SocketManager* socketManager)
     : m_poseReceiver(std::move(poseReceiver))
     , m_pSocketManager(socketManager)
@@ -79,6 +124,11 @@ vr::EVRInitError Driver::Activate(uint32_t unObjectId)
 
     // Indicate this is not a real display
     vr::VRProperties()->SetBoolProperty(props, vr::Prop_IsOnDesktop_Bool, false);
+
+    // Proximity sensor — always report "worn" to prevent SteamVR standby
+    vr::VRProperties()->SetBoolProperty(props, vr::Prop_ContainsProximitySensor_Bool, true);
+    vr::VRDriverInput()->CreateBooleanComponent(props, "/proximity", &m_proximityHandle);
+    vr::VRDriverInput()->UpdateBooleanComponent(m_proximityHandle, true, 0.0);
 
     // Start pose update thread
     m_poseThread = std::jthread([this](std::stop_token st) { PoseUpdateThreadFunc(st); });
@@ -339,6 +389,7 @@ void Driver::GetNextSwapTextureSetIndex(vr::SharedTextureHandle_t sharedTextureH
 
 static vr::SharedTextureHandle_t s_lastSubmittedTextures[2] = { 0, 0 };
 static vr::VRTextureBounds_t s_lastSubmittedBounds[2] = {};
+static Pose s_lastSubmittedPose = {};
 
 void Driver::SubmitLayer(const SubmitLayerPerEye_t (&perEye)[2])
 {
@@ -346,6 +397,7 @@ void Driver::SubmitLayer(const SubmitLayerPerEye_t (&perEye)[2])
     s_lastSubmittedTextures[1] = perEye[1].hTexture;
     s_lastSubmittedBounds[0] = perEye[0].bounds;
     s_lastSubmittedBounds[1] = perEye[1].bounds;
+    s_lastSubmittedPose = HmdMatrix34ToPose(perEye[0].mHmdPose);
 }
 
 void Driver::Present(vr::SharedTextureHandle_t syncTexture)
@@ -428,7 +480,7 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 
         m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
 
-        Frame frame { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye) };
+        Frame frame { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye), s_lastSubmittedPose };
         m_pSocketManager->SendFrame(frame);
     }
 }

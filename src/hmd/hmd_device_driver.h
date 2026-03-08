@@ -96,4 +96,7 @@ private:
 
     // Frame counter
     std::atomic<uint64_t> m_frameCount{0};
+
+    // Proximity sensor (always on to prevent standby)
+    vr::VRInputComponentHandle_t m_proximityHandle = vr::k_ulInvalidInputComponentHandle;
 };
