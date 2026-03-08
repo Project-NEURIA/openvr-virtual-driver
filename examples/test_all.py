@@ -249,8 +249,8 @@ def test_frame_stream(client: Client):
                f"{frame.width}x{frame.height}")
         report("Frame eye is 0 or 1", frame.eye in (0, 1), f"eye={frame.eye}")
         report("Frame has pixel data", len(frame.data) > 0, f"{len(frame.data)} bytes")
-        expected_size = frame.width * frame.height * 4  # BGRA
-        report("Pixel data size matches BGRA", len(frame.data) == expected_size,
+        expected_size = frame.width * frame.height * 4  # RGBA
+        report("Pixel data size matches RGBA", len(frame.data) == expected_size,
                f"expected={expected_size}, got={len(frame.data)}")
         report("Frame pose is not null", not frame.pose.is_null())
     except Exception as e:

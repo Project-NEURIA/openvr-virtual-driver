@@ -91,6 +91,27 @@ vr::EVRInitError AIVRDeviceProvider::Init(vr::IVRDriverContext* pDriverContext)
         return vr::VRInitError_Driver_Unknown;
     }
 
+    // Pre-assign tracker roles in steamvr.vrsettings before adding devices
+    // so SteamVR can autobind them when TrackedDeviceAdded is called
+    struct RoleMapping { const char* serial; const char* settingsRole; };
+    RoleMapping roleMappings[] = {
+        { "OVD-TRACKER-waist", "TrackerRole_Waist" },
+        { "OVD-TRACKER-chest", "TrackerRole_Chest" },
+        { "OVD-TRACKER-left_foot", "TrackerRole_LeftFoot" },
+        { "OVD-TRACKER-right_foot", "TrackerRole_RightFoot" },
+        { "OVD-TRACKER-left_knee", "TrackerRole_LeftKnee" },
+        { "OVD-TRACKER-right_knee", "TrackerRole_RightKnee" },
+        { "OVD-TRACKER-left_elbow", "TrackerRole_LeftElbow" },
+        { "OVD-TRACKER-right_elbow", "TrackerRole_RightElbow" },
+        { "OVD-TRACKER-left_shoulder", "TrackerRole_LeftShoulder" },
+        { "OVD-TRACKER-right_shoulder", "TrackerRole_RightShoulder" }
+    };
+    for (const auto& rm : roleMappings)
+    {
+        std::string devicePath = std::string("/devices/openvr_virtual_driver/") + rm.serial;
+        vr::VRSettings()->SetString(vr::k_pch_Trackers_Section, devicePath.c_str(), rm.settingsRole);
+    }
+
     // Add body trackers
     struct TrackerInit { TrackerRole role; mpsc::Receiver<Pose> receiver; };
     TrackerInit trackerInits[] = {

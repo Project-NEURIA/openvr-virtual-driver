@@ -19,24 +19,6 @@ static const char* GetTrackerRoleName(TrackerRole role)
     }
 }
 
-static const char* GetTrackerRoleHint(TrackerRole role)
-{
-    switch (role)
-    {
-        case TrackerRole::Waist: return "vive_tracker_waist";
-        case TrackerRole::Chest: return "vive_tracker_chest";
-        case TrackerRole::LeftFoot: return "vive_tracker_left_foot";
-        case TrackerRole::RightFoot: return "vive_tracker_right_foot";
-        case TrackerRole::LeftKnee: return "vive_tracker_left_knee";
-        case TrackerRole::RightKnee: return "vive_tracker_right_knee";
-        case TrackerRole::LeftElbow: return "vive_tracker_left_elbow";
-        case TrackerRole::RightElbow: return "vive_tracker_right_elbow";
-        case TrackerRole::LeftShoulder: return "vive_tracker_left_shoulder";
-        case TrackerRole::RightShoulder: return "vive_tracker_right_shoulder";
-        default: return "vive_tracker_handed";
-    }
-}
-
 TrackerDriver::TrackerDriver(TrackerRole role, mpsc::Receiver<Pose> poseReceiver)
     : m_role(role)
     , m_poseReceiver(std::move(poseReceiver))
@@ -52,7 +34,7 @@ vr::EVRInitError TrackerDriver::Activate(uint32_t unObjectId)
 
     vr::VRProperties()->SetStringProperty(container, vr::Prop_ModelNumber_String, "OVD Tracker");
     vr::VRProperties()->SetStringProperty(container, vr::Prop_SerialNumber_String, m_serialNumber.c_str());
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_ControllerType_String, GetTrackerRoleHint(m_role));
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_InputProfilePath_String, "{openvr_virtual_driver}/input/ovd_tracker_profile.json");
     vr::VRProperties()->SetUint64Property(container, vr::Prop_CurrentUniverseId_Uint64, 2);
 
     // Start pose update thread
