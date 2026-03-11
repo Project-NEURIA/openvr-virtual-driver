@@ -90,6 +90,8 @@ bool Driver::InitD3D11()
 
 void Driver::CleanupD3D11()
 {
+    m_pSyncTexture.Reset();
+    m_syncTextureHandle = 0;
     m_pStagingTexture.Reset();
     m_swapTextureSets.clear();
     m_pD3DContext.Reset();
@@ -407,6 +409,26 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
     if (!m_pD3DDevice || !m_pSocketManager)
         return;
 
+    // Acquire sync texture mutex to ensure GPU has finished rendering
+    if (m_syncTextureHandle != syncTexture)
+    {
+        m_syncTextureHandle = syncTexture;
+        m_pSyncTexture.Reset();
+        if (syncTexture)
+        {
+            m_pD3DDevice->OpenSharedResource(
+                reinterpret_cast<HANDLE>(syncTexture),
+                __uuidof(ID3D11Texture2D),
+                reinterpret_cast<void**>(m_pSyncTexture.GetAddressOf()));
+        }
+    }
+
+    ComPtr<IDXGIKeyedMutex> pSyncMutex;
+    if (m_pSyncTexture && SUCCEEDED(m_pSyncTexture->QueryInterface(__uuidof(IDXGIKeyedMutex), reinterpret_cast<void**>(pSyncMutex.GetAddressOf()))))
+    {
+        pSyncMutex->AcquireSync(0, 10);
+    }
+
     for (int eye = 0; eye < 2; eye++)
     {
         if (s_lastSubmittedTextures[eye] == 0)
@@ -482,6 +504,11 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 
         Frame frame { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye), s_lastSubmittedPose };
         m_pSocketManager->SendFrame(frame);
+    }
+
+    if (pSyncMutex)
+    {
+        pSyncMutex->ReleaseSync(0);
     }
 }
 

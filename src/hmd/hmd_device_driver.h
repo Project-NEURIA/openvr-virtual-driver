@@ -2,6 +2,7 @@
 
 #include <openvr_driver.h>
 #include <d3d11.h>
+#include <dxgi.h>
 #include <wrl/client.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -62,7 +63,7 @@ private:
     std::string m_serialNumber = "OVD-HMD-001";
 
     // Display properties
-    int32_t m_renderWidth    = 1920;
+    int32_t m_renderWidth    = 1080;
     int32_t m_renderHeight   = 1080;
     float m_displayFrequency = 90.0f;
     float m_ipd = 0.063f; // 63mm
@@ -76,6 +77,10 @@ private:
     uint32_t m_stagingWidth = 0;
     uint32_t m_stagingHeight = 0;
     DXGI_FORMAT m_stagingFormat = DXGI_FORMAT_UNKNOWN;
+
+    // Sync texture for GPU synchronization
+    vr::SharedTextureHandle_t m_syncTextureHandle = 0;
+    ComPtr<ID3D11Texture2D> m_pSyncTexture;
 
     // Texture management
     struct SwapTextureSetData

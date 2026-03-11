@@ -1,4 +1,10 @@
-"""Integration test for ovd_client — requires SteamVR running with the virtual driver."""
+"""
+Integration test for ovd_client — requires SteamVR running with the virtual driver.
+
+Use `uv sync --extra test` to install test dependencies
+To run: cd client && uv run python ../examples/test_all.py
+"""
+
 
 import math
 import os
@@ -243,8 +249,8 @@ def test_frame_stream(client: Client):
                f"{frame.width}x{frame.height}")
         report("Frame eye is 0 or 1", frame.eye in (0, 1), f"eye={frame.eye}")
         report("Frame has pixel data", len(frame.data) > 0, f"{len(frame.data)} bytes")
-        expected_size = frame.width * frame.height * 4  # BGRA
-        report("Pixel data size matches BGRA", len(frame.data) == expected_size,
+        expected_size = frame.width * frame.height * 4  # RGBA
+        report("Pixel data size matches RGBA", len(frame.data) == expected_size,
                f"expected={expected_size}, got={len(frame.data)}")
         report("Frame pose is not null", not frame.pose.is_null())
     except Exception as e:
@@ -279,18 +285,23 @@ def test_frame_stream(client: Client):
 def test_camera_with_frames(client: Client):
     print("\n=== Camera intrinsics/extrinsics via Client ===")
 
-    K = client.get_intrinsics()
-    report("Client.get_intrinsics shape", K.shape == (3, 3))
-
     try:
         with client.frame_stream() as frames:
             frame = next(frames)
+
+        # After get_frame(), camera is auto-calibrated to actual resolution
+        K = client.get_intrinsics()
+        report("Client.get_intrinsics shape", K.shape == (3, 3))
+        report("Intrinsics match frame resolution",
+               K[0, 0] == frame.width / 2.0 and K[1, 1] == frame.height / 2.0,
+               f"fx={K[0,0]}, fy={K[1,1]}, frame={frame.width}x{frame.height}")
+
         T = client.get_extrinsics(frame)
         report("Client.get_extrinsics shape", T.shape == (4, 4))
         report("Extrinsics last row is [0,0,0,1]",
                list(T[3]) == [0.0, 0.0, 0.0, 1.0])
     except Exception as e:
-        report("Client.get_extrinsics", False, str(e))
+        report("Camera intrinsics/extrinsics", False, str(e))
 
 
 def test_save_frame(client: Client):
