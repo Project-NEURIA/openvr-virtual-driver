@@ -7,10 +7,23 @@
 #include <memory>
 #include <thread>
 #include <mutex>
+
+#ifdef _WIN32
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cerrno>
+using SOCKET = int;
+#define INVALID_SOCKET (-1)
+#define SOCKET_ERROR (-1)
+#endif
+
 #include "../mpsc/channel.h"
 
 enum class MsgType : uint32_t {

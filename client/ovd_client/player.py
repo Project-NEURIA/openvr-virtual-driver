@@ -240,8 +240,8 @@ class Player:
 
     def _send_tpose(self, pos_x: float, pos_y: float, pos_z: float, yaw: float, pitch: float) -> None:
         """Send T-pose body position rotated by yaw."""
-        cos_yaw = math.cos(yaw)
-        sin_yaw = math.sin(yaw)
+        cos_yaw = math.cos(-yaw)
+        sin_yaw = math.sin(-yaw)
 
         def rotated_pose(offset_x: float, height: float, offset_z: float = 0.0) -> Pose:
             rx = offset_x * cos_yaw - offset_z * sin_yaw
@@ -251,6 +251,7 @@ class Player:
 
         head_qw, head_qx, head_qy, head_qz = _euler_to_quaternion(yaw, pitch)
         head = Pose(pos_x=pos_x, pos_y=pos_y, pos_z=pos_z, rot_w=head_qw, rot_x=head_qx, rot_y=head_qy, rot_z=head_qz)
+        print(f"[TPOSE] yaw={yaw:.2f} rhand=({pos_x + 0.67*cos_yaw:.2f}, {pos_z + 0.67*sin_yaw:.2f})")
 
         self._client.update_pose(
             head=head,
