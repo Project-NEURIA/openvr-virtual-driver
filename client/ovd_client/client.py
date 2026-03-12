@@ -192,6 +192,10 @@ class Client:
             )
         self._camera_calibrated = True
 
+    def get_ipd(self) -> float:
+        """Return the inter-pupillary distance in meters."""
+        return self._camera.ipd
+
     def get_intrinsics(self) -> NDArray[np.float64]:
         """Return the 3x3 camera intrinsics matrix K."""
         return self._camera.intrinsics
