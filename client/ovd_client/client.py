@@ -65,6 +65,13 @@ class Frame:
     data: bytes
 
 
+@dataclass
+class StereoFrame:
+    """A synchronized pair of left and right eye frames from the same Present() call."""
+    left: Frame
+    right: Frame
+
+
 class Camera:
     """Computes per-eye camera intrinsics & extrinsics for the virtual HMD."""
 
@@ -247,6 +254,50 @@ class Client:
         """Yield frames from the driver indefinitely."""
         while True:
             yield self.get_frame()
+
+    def _stereo_iter(self) -> Generator[StereoFrame, None, None]:
+        """Yield stereo frame pairs from the driver indefinitely."""
+        while True:
+            yield self.get_stereo_frame()
+
+    def get_stereo_frame(self) -> StereoFrame:
+        """Receive a synchronized left+right frame pair (blocking).
+
+        Reads frames until a left (eye=0) followed by right (eye=1) pair is
+        found, discarding any orphaned frames to ensure correct pairing.
+        """
+        # Find a left eye frame
+        left = self.get_frame()
+        while left.eye != 0:
+            left = self.get_frame()
+
+        # The next frame should be the right eye from the same Present() call
+        right = self.get_frame()
+        if right.eye != 1:
+            # Lost sync — search again recursively
+            return self.get_stereo_frame()
+
+        return StereoFrame(left=left, right=right)
+
+    @contextmanager
+    def stereo_stream(self) -> Generator:
+        """Context manager that yields synchronized stereo frame pairs.
+
+        Usage:
+            with client.stereo_stream() as frames:
+                for stereo in frames:
+                    process(stereo.left, stereo.right)
+        """
+        self.start_frame_stream()
+        try:
+            first = self.get_stereo_frame()
+            self._calibrate_camera(first.left)
+            yield chain((first,), self._stereo_iter())
+        finally:
+            try:
+                self.stop_frame_stream()
+            except Exception:
+                pass
 
     def update_controller(
         self,

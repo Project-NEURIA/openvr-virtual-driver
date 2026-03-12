@@ -311,15 +311,21 @@ def test_save_frame(client: Client):
         import numpy as np
         from PIL import Image
 
-        with client.frame_stream() as frames:
-            frame = next(frames)
-
-        arr = np.frombuffer(frame.data, dtype=np.uint8).reshape(frame.height, frame.width, 4)
-        img = Image.fromarray(arr, "RGBA")
         out_dir = os.path.dirname(os.path.abspath(__file__))
-        out_path = os.path.join(out_dir, "frame.png")
-        img.save(out_path)
-        report("Save frame to PNG", True, out_path)
+        saved = {}
+        with client.frame_stream() as frames:
+            for frame in frames:
+                eye_name = "left" if frame.eye == 0 else "right"
+                if eye_name not in saved:
+                    arr = np.frombuffer(frame.data, dtype=np.uint8).reshape(frame.height, frame.width, 4)
+                    img = Image.fromarray(arr, "RGBA")
+                    out_path = os.path.join(out_dir, f"{eye_name}.png")
+                    img.save(out_path)
+                    saved[eye_name] = out_path
+                if len(saved) == 2:
+                    break
+        for eye_name, path in saved.items():
+            report(f"Save {eye_name} eye to PNG", True, path)
     except Exception as e:
         report("Save frame to PNG", False, str(e))
 
