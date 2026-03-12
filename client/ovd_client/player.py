@@ -167,21 +167,34 @@ class Player:
                         position_changed = True
 
                     # Controller inputs
-                    trigger = 1.0 if keys[pygame.K_1] else 0.0
-                    grip = 1.0 if keys[pygame.K_2] else 0.0
-                    a_click = keys[pygame.K_3]
-                    b_click = keys[pygame.K_4]
-                    joystick_click = keys[pygame.K_5]
-                    menu_click = keys[pygame.K_6]
-
+                    # Right hand: 1=trigger, 2=grip, 3=A(jump), 4=B, 9=joystick click
+                    r_trigger = 1.0 if keys[pygame.K_1] else 0.0
+                    r_grip = 1.0 if keys[pygame.K_2] else 0.0
+                    r_a = keys[pygame.K_3]
+                    r_b = keys[pygame.K_4]
+                    r_joy = keys[pygame.K_9]
                     self._client.update_controller(
-                        trigger=trigger, trigger_click=(trigger > 0.9), trigger_touch=(trigger > 0.0),
-                        grip=grip, grip_click=(grip > 0.9), grip_touch=(grip > 0.0),
-                        a_click=a_click, a_touch=a_click,
-                        b_click=b_click, b_touch=b_click,
-                        joystick_click=joystick_click,
-                        menu_click=menu_click,
+                        hand=1,
+                        trigger=r_trigger, trigger_click=(r_trigger > 0.9), trigger_touch=(r_trigger > 0.0),
+                        grip=r_grip, grip_click=(r_grip > 0.9), grip_touch=(r_grip > 0.0),
+                        a_click=r_a, a_touch=r_a,
+                        b_click=r_b, b_touch=r_b,
+                        joystick_click=r_joy,
                         right_yaw=right_yaw, right_pitch=right_pitch,
+                    )
+                    # Left hand: 5=B(menu), 6=A, 7=trigger, 8=grip, 0=joystick click
+                    l_b = keys[pygame.K_5]
+                    l_a = keys[pygame.K_6]
+                    l_trigger = 1.0 if keys[pygame.K_7] else 0.0
+                    l_grip = 1.0 if keys[pygame.K_8] else 0.0
+                    l_joy = keys[pygame.K_0]
+                    self._client.update_controller(
+                        hand=0,
+                        trigger=l_trigger, trigger_click=(l_trigger > 0.9), trigger_touch=(l_trigger > 0.0),
+                        grip=l_grip, grip_click=(l_grip > 0.9), grip_touch=(l_grip > 0.0),
+                        a_click=l_a, a_touch=l_a,
+                        b_click=l_b, b_touch=l_b,
+                        joystick_click=l_joy,
                     )
 
                     # Send body pose: VMD or T-pose

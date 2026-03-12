@@ -57,6 +57,8 @@ struct Pose {
 };
 
 struct ControllerInput {
+    // 0 = left, 1 = right
+    uint8_t hand;
     // Joystick
     float joystickX;
     float joystickY;

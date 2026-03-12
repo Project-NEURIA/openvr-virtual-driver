@@ -1,5 +1,6 @@
 #include "controller_device_driver.h"
 #include <chrono>
+#include <cmath>
 
 ControllerDriver::ControllerDriver(vr::ETrackedControllerRole role,
                                    mpsc::Receiver<ControllerInput> inputReceiver,
@@ -28,17 +29,17 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
     vr::VRProperties()->SetStringProperty(container, vr::Prop_ModelNumber_String, "OVD Controller");
     vr::VRProperties()->SetStringProperty(container, vr::Prop_SerialNumber_String, m_serialNumber.c_str());
     vr::VRProperties()->SetInt32Property(container, vr::Prop_ControllerRoleHint_Int32, m_role);
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_ControllerType_String, "ovd_controller");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_InputProfilePath_String, "{openvr_virtual_driver}/input/ovd_controller_profile.json");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_ControllerType_String, "knuckles");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_InputProfilePath_String, "{indexcontroller}/input/index_controller_profile.json");
     vr::VRProperties()->SetUint64Property(container, vr::Prop_CurrentUniverseId_Uint64, 2);
 
-    // Create joystick input components
-    vr::VRDriverInput()->CreateScalarComponent(container, "/input/joystick/x", &m_joystickXHandle,
+    // Create thumbstick input components
+    vr::VRDriverInput()->CreateScalarComponent(container, "/input/thumbstick/x", &m_joystickXHandle,
         vr::VRScalarType_Absolute, vr::VRScalarUnits_NormalizedTwoSided);
-    vr::VRDriverInput()->CreateScalarComponent(container, "/input/joystick/y", &m_joystickYHandle,
+    vr::VRDriverInput()->CreateScalarComponent(container, "/input/thumbstick/y", &m_joystickYHandle,
         vr::VRScalarType_Absolute, vr::VRScalarUnits_NormalizedTwoSided);
-    vr::VRDriverInput()->CreateBooleanComponent(container, "/input/joystick/click", &m_joystickClickHandle);
-    vr::VRDriverInput()->CreateBooleanComponent(container, "/input/joystick/touch", &m_joystickTouchHandle);
+    vr::VRDriverInput()->CreateBooleanComponent(container, "/input/thumbstick/click", &m_joystickClickHandle);
+    vr::VRDriverInput()->CreateBooleanComponent(container, "/input/thumbstick/touch", &m_joystickTouchHandle);
 
     // Create trigger input components
     vr::VRDriverInput()->CreateScalarComponent(container, "/input/trigger/value", &m_triggerValueHandle,
@@ -97,6 +98,13 @@ void ControllerDriver::InputUpdateThreadFunc(std::stop_token st)
             vr::VRDriverInput()->UpdateBooleanComponent(m_bTouchHandle, input->bTouch, 0);
             vr::VRDriverInput()->UpdateBooleanComponent(m_systemClickHandle, input->systemClick, 0);
             vr::VRDriverInput()->UpdateBooleanComponent(m_menuClickHandle, input->menuClick, 0);
+
+            // Store aim angles for pose thread (right controller only)
+            if (m_role == vr::TrackedControllerRole_RightHand)
+            {
+                m_aimYaw.store(input->rightYaw, std::memory_order_relaxed);
+                m_aimPitch.store(input->rightPitch, std::memory_order_relaxed);
+            }
         }
         else
         {
@@ -122,8 +130,10 @@ void ControllerDriver::PoseUpdateThreadFunc(std::stop_token st)
     while (!st.stop_requested())
     {
         // Check for new pose (non-blocking)
+        bool hasExternalPose = false;
         if (auto p = m_poseReceiver.try_recv())
         {
+            hasExternalPose = true;
             pose.vecPosition[0] = p->posX;
             pose.vecPosition[1] = p->posY;
             pose.vecPosition[2] = p->posZ;
@@ -136,6 +146,19 @@ void ControllerDriver::PoseUpdateThreadFunc(std::stop_token st)
             {
                 pose.qRotation.w = 1.0;
             }
+        }
+
+        // Apply aim rotation for right controller (only when no external pose)
+        if (!hasExternalPose && m_role == vr::TrackedControllerRole_RightHand)
+        {
+            float yaw = m_aimYaw.load(std::memory_order_relaxed);
+            float pitch = m_aimPitch.load(std::memory_order_relaxed);
+            float cy = std::cos(yaw * 0.5f), sy = std::sin(yaw * 0.5f);
+            float cp = std::cos(pitch * 0.5f), sp = std::sin(pitch * 0.5f);
+            pose.qRotation.w = cp * cy;
+            pose.qRotation.x = sp * cy;
+            pose.qRotation.y = cp * sy;
+            pose.qRotation.z = -sp * sy;
         }
 
         // Always send current pose

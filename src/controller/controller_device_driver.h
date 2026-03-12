@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <openvr_driver.h>
 #include <string>
 #include <thread>
@@ -30,7 +31,7 @@ private:
     vr::ETrackedControllerRole m_role;
     std::string m_serialNumber;
 
-    // Input component handles - Joystick
+    // Input component handles - Thumbstick
     vr::VRInputComponentHandle_t m_joystickXHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_joystickYHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_joystickClickHandle = vr::k_ulInvalidInputComponentHandle;
@@ -64,4 +65,8 @@ private:
     // Pose channel
     mpsc::Receiver<Pose> m_poseReceiver;
     std::jthread m_poseThread;
+
+    // Right controller aim (set by input thread, read by pose thread)
+    std::atomic<float> m_aimYaw{0.0f};
+    std::atomic<float> m_aimPitch{0.0f};
 };

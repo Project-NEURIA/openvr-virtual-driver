@@ -250,6 +250,7 @@ class Client:
 
     def update_controller(
         self,
+        hand: int = 0,
         joystick_x: float = 0.0,
         joystick_y: float = 0.0,
         joystick_click: bool = False,
@@ -269,9 +270,14 @@ class Client:
         right_yaw: float = 0.0,
         right_pitch: float = 0.0,
     ) -> None:
-        """Send controller input state."""
+        """Send controller input state.
+
+        Args:
+            hand: 0 = left, 1 = right
+        """
         data = struct.pack(
-            "<ff BB f BB f BB BBBBBB ff",
+            "<B ff BB f BB f BB BBBBBB ff",
+            hand,
             joystick_x, joystick_y,
             joystick_click, joystick_touch,
             trigger, trigger_click, trigger_touch,

@@ -209,8 +209,10 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
                 break;
             }
 
-            m_leftControllerInputSender.send(input);
-            m_rightControllerInputSender.send(input);
+            if (input.hand == 0)
+                m_leftControllerInputSender.send(input);
+            else
+                m_rightControllerInputSender.send(input);
         }
         else
         {
