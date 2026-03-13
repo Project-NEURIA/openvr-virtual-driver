@@ -1,18 +1,20 @@
 #pragma once
 
 #include <openvr_driver.h>
-#include <d3d11.h>
-#include <dxgi.h>
-#include <wrl/client.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <vector>
 #include <thread>
 #include <atomic>
 #include "../socket/socket_manager.h"
 #include "../mpsc/channel.h"
 
+#ifdef _WIN32
+#include <d3d11.h>
+#include <dxgi.h>
+#include <wrl/client.h>
 using Microsoft::WRL::ComPtr;
+#else
+#include <vulkan/vulkan.h>
+#endif
 
 class Driver : public vr::ITrackedDeviceServerDriver,
                public vr::IVRDisplayComponent,
@@ -55,8 +57,6 @@ public:
     void ProcessEvent(const vr::VREvent_t& event);
 
 private:
-    bool InitD3D11();
-    void CleanupD3D11();
     void PoseUpdateThreadFunc(std::stop_token st);
 
     uint32_t m_unObjectId = vr::k_unTrackedDeviceIndexInvalid;
@@ -68,21 +68,22 @@ private:
     float m_displayFrequency = 90.0f;
     float m_ipd = 0.063f; // 63mm
 
+#ifdef _WIN32
     // D3D11 resources
+    bool InitD3D11();
+    void CleanupD3D11();
+
     ComPtr<ID3D11Device> m_pD3DDevice;
     ComPtr<ID3D11DeviceContext> m_pD3DContext;
 
-    // Staging texture for CPU readback
     ComPtr<ID3D11Texture2D> m_pStagingTexture;
     uint32_t m_stagingWidth = 0;
     uint32_t m_stagingHeight = 0;
     DXGI_FORMAT m_stagingFormat = DXGI_FORMAT_UNKNOWN;
 
-    // Sync texture for GPU synchronization
     vr::SharedTextureHandle_t m_syncTextureHandle = 0;
     ComPtr<ID3D11Texture2D> m_pSyncTexture;
 
-    // Texture management
     struct SwapTextureSetData
     {
         uint32_t pid;
@@ -90,6 +91,43 @@ private:
         HANDLE sharedHandles[3];
         uint32_t currentIndex;
     };
+#else
+    // Vulkan resources for importing and reading back shared textures
+    bool InitVulkan();
+    void CleanupVulkan();
+    uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+    static uint32_t DXGIFormatToVkFormat(uint32_t dxgiFormat);
+
+    VkInstance m_vkInstance = VK_NULL_HANDLE;
+    VkPhysicalDevice m_vkPhysicalDevice = VK_NULL_HANDLE;
+    VkDevice m_vkDevice = VK_NULL_HANDLE;
+    VkQueue m_vkQueue = VK_NULL_HANDLE;
+    uint32_t m_vkQueueFamily = 0;
+    VkCommandPool m_vkCommandPool = VK_NULL_HANDLE;
+    VkCommandBuffer m_vkCommandBuffer = VK_NULL_HANDLE;
+
+    // Staging buffer for CPU readback
+    VkBuffer m_stagingBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_stagingMemory = VK_NULL_HANDLE;
+    VkDeviceSize m_stagingSize = 0;
+
+    struct ImportedTexture
+    {
+        int fd = -1;
+        VkImage image = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+    };
+
+    struct SwapTextureSetData
+    {
+        uint32_t pid;
+        vr::SharedTextureHandle_t handles[3];
+        ImportedTexture imported[3]; // Imported into our Vulkan device for readback
+        uint32_t width, height;
+        uint32_t currentIndex;
+    };
+#endif
+
     std::vector<SwapTextureSetData> m_swapTextureSets;
 
     // Networking

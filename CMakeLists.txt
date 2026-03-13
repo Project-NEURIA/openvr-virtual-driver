@@ -26,7 +26,6 @@ target_include_directories(driver_${DRIVER_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-# Windows specific
 if(WIN32)
     # Link D3D11 for texture handling, ws2_32 for TCP
     target_link_libraries(driver_${DRIVER_NAME} PRIVATE
@@ -35,16 +34,33 @@ if(WIN32)
         ws2_32
     )
 
+    target_compile_definitions(driver_${DRIVER_NAME} PRIVATE
+        -DNOMINMAX
+        -DWIN32_LEAN_AND_MEAN
+    )
+
     # Output to driver folder structure
     set_target_properties(driver_${DRIVER_NAME} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/ai_vopenvr_virtual_driver/bin/win64"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/win64"
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/win64"
         LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/win64"
         LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/win64"
     )
-endif()
+else()
+    # Linux: Vulkan for texture handling, pthreads
+    find_package(Vulkan REQUIRED)
 
-target_compile_definitions(driver_${DRIVER_NAME} PRIVATE
-    -DNOMINMAX
-    -DWIN32_LEAN_AND_MEAN
-)
+    target_link_libraries(driver_${DRIVER_NAME} PRIVATE
+        Vulkan::Vulkan
+        pthread
+    )
+
+    # Hide symbols by default, only export HmdDriverFactory
+    # Remove "lib" prefix — SteamVR expects driver_<name>.so
+    set_target_properties(driver_${DRIVER_NAME} PROPERTIES
+        PREFIX ""
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/openvr_virtual_driver/bin/linux64"
+    )
+endif()
