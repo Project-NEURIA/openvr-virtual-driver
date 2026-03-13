@@ -208,7 +208,6 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
                 Log("[OVD] Client recv controller failed\n");
                 break;
             }
-
             if (input.hand == 0)
                 m_leftControllerInputSender.send(input);
             else

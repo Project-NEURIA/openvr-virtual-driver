@@ -1,9 +1,9 @@
 #pragma once
 
-#include <atomic>
 #include <openvr_driver.h>
 #include <string>
 #include <thread>
+#include <chrono>
 #include "../socket/socket_manager.h"
 #include "../mpsc/channel.h"
 
@@ -15,7 +15,6 @@ public:
                      mpsc::Receiver<Pose> poseReceiver);
     ~ControllerDriver() = default;
 
-    // ITrackedDeviceServerDriver interface
     vr::EVRInitError Activate(uint32_t unObjectId) override;
     void Deactivate() override;
     void EnterStandby() override;
@@ -23,50 +22,35 @@ public:
     void DebugRequest(const char* pchRequest, char* pchResponseBuffer, uint32_t unResponseBufferSize) override;
     vr::DriverPose_t GetPose() override;
 
-    // Public methods
     const char* GetSerialNumber() const { return m_serialNumber.c_str(); }
 
 private:
+    void UpdateThreadFunc(std::stop_token st);
+
     uint32_t m_deviceIndex = vr::k_unTrackedDeviceIndexInvalid;
     vr::ETrackedControllerRole m_role;
     std::string m_serialNumber;
 
-    // Input component handles - Thumbstick
+    // Input component handles
     vr::VRInputComponentHandle_t m_joystickXHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_joystickYHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_joystickClickHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_joystickTouchHandle = vr::k_ulInvalidInputComponentHandle;
-    // Input component handles - Trigger
     vr::VRInputComponentHandle_t m_triggerValueHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_triggerClickHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_triggerTouchHandle = vr::k_ulInvalidInputComponentHandle;
-    // Input component handles - Grip
     vr::VRInputComponentHandle_t m_gripValueHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_gripClickHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_gripTouchHandle = vr::k_ulInvalidInputComponentHandle;
-    // Input component handles - Buttons
     vr::VRInputComponentHandle_t m_aClickHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_aTouchHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_bClickHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_bTouchHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_systemClickHandle = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t m_menuClickHandle = vr::k_ulInvalidInputComponentHandle;
-    // Haptic
     vr::VRInputComponentHandle_t m_hapticHandle = vr::k_ulInvalidInputComponentHandle;
 
-    // Thread functions
-    void InputUpdateThreadFunc(std::stop_token st);
-    void PoseUpdateThreadFunc(std::stop_token st);
-
-    // Input channel
     mpsc::Receiver<ControllerInput> m_inputReceiver;
-    std::jthread m_inputThread;
-
-    // Pose channel
     mpsc::Receiver<Pose> m_poseReceiver;
-    std::jthread m_poseThread;
-
-    // Right controller aim (set by input thread, read by pose thread)
-    std::atomic<float> m_aimYaw{0.0f};
-    std::atomic<float> m_aimPitch{0.0f};
+    std::jthread m_thread;
 };

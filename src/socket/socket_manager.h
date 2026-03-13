@@ -59,7 +59,7 @@ struct Pose {
 struct ControllerInput {
     // 0 = left, 1 = right
     uint8_t hand;
-    // Joystick
+    // Thumbstick
     float joystickX;
     float joystickY;
     uint8_t joystickClick;
@@ -79,9 +79,6 @@ struct ControllerInput {
     uint8_t bTouch;
     uint8_t systemClick;
     uint8_t menuClick;
-    // Right controller rotation (radians)
-    float rightYaw;
-    float rightPitch;
 };
 
 struct BodyPosition {

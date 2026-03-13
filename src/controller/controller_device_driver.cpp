@@ -1,6 +1,4 @@
 #include "controller_device_driver.h"
-#include <chrono>
-#include <cmath>
 
 ControllerDriver::ControllerDriver(vr::ETrackedControllerRole role,
                                    mpsc::Receiver<ControllerInput> inputReceiver,
@@ -9,14 +7,8 @@ ControllerDriver::ControllerDriver(vr::ETrackedControllerRole role,
     , m_inputReceiver(std::move(inputReceiver))
     , m_poseReceiver(std::move(poseReceiver))
 {
-    if (role == vr::TrackedControllerRole_LeftHand)
-    {
-        m_serialNumber = "OVD-CTRL-LEFT";
-    }
-    else
-    {
-        m_serialNumber = "OVD-CTRL-RIGHT";
-    }
+    m_serialNumber = (role == vr::TrackedControllerRole_LeftHand)
+        ? "OVD-CTRL-LEFT" : "OVD-CTRL-RIGHT";
 }
 
 vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
@@ -25,7 +17,6 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
 
     vr::PropertyContainerHandle_t container = vr::VRProperties()->TrackedDeviceToPropertyContainer(m_deviceIndex);
 
-    // Set controller properties
     vr::VRProperties()->SetStringProperty(container, vr::Prop_ModelNumber_String, "OVD Controller");
     vr::VRProperties()->SetStringProperty(container, vr::Prop_SerialNumber_String, m_serialNumber.c_str());
     vr::VRProperties()->SetInt32Property(container, vr::Prop_ControllerRoleHint_Int32, m_role);
@@ -33,7 +24,7 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
     vr::VRProperties()->SetStringProperty(container, vr::Prop_InputProfilePath_String, "{indexcontroller}/input/index_controller_profile.json");
     vr::VRProperties()->SetUint64Property(container, vr::Prop_CurrentUniverseId_Uint64, 2);
 
-    // Create thumbstick input components
+    // Thumbstick
     vr::VRDriverInput()->CreateScalarComponent(container, "/input/thumbstick/x", &m_joystickXHandle,
         vr::VRScalarType_Absolute, vr::VRScalarUnits_NormalizedTwoSided);
     vr::VRDriverInput()->CreateScalarComponent(container, "/input/thumbstick/y", &m_joystickYHandle,
@@ -41,19 +32,19 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/thumbstick/click", &m_joystickClickHandle);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/thumbstick/touch", &m_joystickTouchHandle);
 
-    // Create trigger input components
+    // Trigger
     vr::VRDriverInput()->CreateScalarComponent(container, "/input/trigger/value", &m_triggerValueHandle,
         vr::VRScalarType_Absolute, vr::VRScalarUnits_NormalizedOneSided);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/trigger/click", &m_triggerClickHandle);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/trigger/touch", &m_triggerTouchHandle);
 
-    // Create grip input components
+    // Grip
     vr::VRDriverInput()->CreateScalarComponent(container, "/input/grip/value", &m_gripValueHandle,
         vr::VRScalarType_Absolute, vr::VRScalarUnits_NormalizedOneSided);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/grip/click", &m_gripClickHandle);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/grip/touch", &m_gripTouchHandle);
 
-    // Create button components
+    // Buttons
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/a/click", &m_aClickHandle);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/a/touch", &m_aTouchHandle);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/b/click", &m_bClickHandle);
@@ -61,23 +52,31 @@ vr::EVRInitError ControllerDriver::Activate(uint32_t unObjectId)
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/system/click", &m_systemClickHandle);
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/application_menu/click", &m_menuClickHandle);
 
-    // Create haptic component
+    // Haptic
     vr::VRDriverInput()->CreateHapticComponent(container, "/output/haptic", &m_hapticHandle);
 
-    // Start input update thread
-    m_inputThread = std::jthread([this](std::stop_token st) { InputUpdateThreadFunc(st); });
-
-    // Start pose update thread
-    m_poseThread = std::jthread([this](std::stop_token st) { PoseUpdateThreadFunc(st); });
+    m_thread = std::jthread([this](std::stop_token st) { UpdateThreadFunc(st); });
 
     return vr::VRInitError_None;
 }
 
-void ControllerDriver::InputUpdateThreadFunc(std::stop_token st)
+void ControllerDriver::UpdateThreadFunc(std::stop_token st)
 {
+    vr::DriverPose_t pose = {};
+    pose.poseIsValid = true;
+    pose.result = vr::TrackingResult_Running_OK;
+    pose.deviceIsConnected = true;
+    pose.qWorldFromDriverRotation.w = 1.0;
+    pose.qDriverFromHeadRotation.w = 1.0;
+    pose.vecPosition[0] = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.67 : 0.67;
+    pose.vecPosition[1] = 1.41;
+    pose.vecPosition[2] = 0.0;
+    pose.qRotation.w = 1.0;
+
     while (!st.stop_requested())
     {
-        if (auto input = m_inputReceiver.recv())
+        // Poll input (non-blocking)
+        if (auto input = m_inputReceiver.try_recv())
         {
             vr::VRDriverInput()->UpdateScalarComponent(m_joystickXHandle, input->joystickX, 0);
             vr::VRDriverInput()->UpdateScalarComponent(m_joystickYHandle, input->joystickY, 0);
@@ -98,42 +97,11 @@ void ControllerDriver::InputUpdateThreadFunc(std::stop_token st)
             vr::VRDriverInput()->UpdateBooleanComponent(m_bTouchHandle, input->bTouch, 0);
             vr::VRDriverInput()->UpdateBooleanComponent(m_systemClickHandle, input->systemClick, 0);
             vr::VRDriverInput()->UpdateBooleanComponent(m_menuClickHandle, input->menuClick, 0);
-
-            // Store aim angles for pose thread (right controller only)
-            if (m_role == vr::TrackedControllerRole_RightHand)
-            {
-                m_aimYaw.store(input->rightYaw, std::memory_order_relaxed);
-                m_aimPitch.store(input->rightPitch, std::memory_order_relaxed);
-            }
         }
-        else
-        {
-            break; // Channel closed
-        }
-    }
-}
 
-void ControllerDriver::PoseUpdateThreadFunc(std::stop_token st)
-{
-    // Initialize with T-pose hand position
-    vr::DriverPose_t pose = {};
-    pose.poseIsValid = true;
-    pose.result = vr::TrackingResult_Running_OK;
-    pose.deviceIsConnected = true;
-    pose.qWorldFromDriverRotation.w = 1.0;
-    pose.qDriverFromHeadRotation.w = 1.0;
-    pose.vecPosition[0] = (m_role == vr::TrackedControllerRole_LeftHand) ? -0.67 : 0.67;
-    pose.vecPosition[1] = 1.41;
-    pose.vecPosition[2] = 0.0;
-    pose.qRotation.w = 1.0;
-
-    while (!st.stop_requested())
-    {
-        // Check for new pose (non-blocking)
-        bool hasExternalPose = false;
+        // Poll external pose (non-blocking)
         if (auto p = m_poseReceiver.try_recv())
         {
-            hasExternalPose = true;
             pose.vecPosition[0] = p->posX;
             pose.vecPosition[1] = p->posY;
             pose.vecPosition[2] = p->posZ;
@@ -148,20 +116,6 @@ void ControllerDriver::PoseUpdateThreadFunc(std::stop_token st)
             }
         }
 
-        // Apply aim rotation for right controller (only when no external pose)
-        if (!hasExternalPose && m_role == vr::TrackedControllerRole_RightHand)
-        {
-            float yaw = m_aimYaw.load(std::memory_order_relaxed);
-            float pitch = m_aimPitch.load(std::memory_order_relaxed);
-            float cy = std::cos(yaw * 0.5f), sy = std::sin(yaw * 0.5f);
-            float cp = std::cos(pitch * 0.5f), sp = std::sin(pitch * 0.5f);
-            pose.qRotation.w = cp * cy;
-            pose.qRotation.x = sp * cy;
-            pose.qRotation.y = cp * sy;
-            pose.qRotation.z = -sp * sy;
-        }
-
-        // Always send current pose
         vr::VRServerDriverHost()->TrackedDevicePoseUpdated(m_deviceIndex, pose, sizeof(vr::DriverPose_t));
 
         std::this_thread::sleep_for(std::chrono::milliseconds(11)); // ~90Hz
@@ -170,27 +124,17 @@ void ControllerDriver::PoseUpdateThreadFunc(std::stop_token st)
 
 void ControllerDriver::Deactivate()
 {
-    if (m_inputThread.joinable())
+    if (m_thread.joinable())
     {
-        m_inputThread.request_stop();
-        m_inputThread.join();
-    }
-    if (m_poseThread.joinable())
-    {
-        m_poseThread.request_stop();
-        m_poseThread.join();
+        m_thread.request_stop();
+        m_thread.join();
     }
     m_deviceIndex = vr::k_unTrackedDeviceIndexInvalid;
 }
 
-void ControllerDriver::EnterStandby()
-{
-}
+void ControllerDriver::EnterStandby() {}
 
-void* ControllerDriver::GetComponent(const char* pchComponentNameAndVersion)
-{
-    return nullptr;
-}
+void* ControllerDriver::GetComponent(const char* pchComponentNameAndVersion) { return nullptr; }
 
 void ControllerDriver::DebugRequest(const char* pchRequest, char* pchResponseBuffer, uint32_t unResponseBufferSize)
 {
@@ -200,7 +144,6 @@ void ControllerDriver::DebugRequest(const char* pchRequest, char* pchResponseBuf
 
 vr::DriverPose_t ControllerDriver::GetPose()
 {
-    // Deprecated - poses are pushed via TrackedDevicePoseUpdated
     vr::DriverPose_t pose = {};
     pose.poseIsValid = false;
     return pose;

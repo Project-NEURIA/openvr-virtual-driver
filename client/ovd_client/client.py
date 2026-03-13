@@ -267,8 +267,6 @@ class Client:
         b_touch: bool = False,
         system_click: bool = False,
         menu_click: bool = False,
-        right_yaw: float = 0.0,
-        right_pitch: float = 0.0,
     ) -> None:
         """Send controller input state.
 
@@ -276,7 +274,7 @@ class Client:
             hand: 0 = left, 1 = right
         """
         data = struct.pack(
-            "<B ff BB f BB f BB BBBBBB ff",
+            "<B ff BB f BB f BB BBBBBB",
             hand,
             joystick_x, joystick_y,
             joystick_click, joystick_touch,
@@ -284,7 +282,6 @@ class Client:
             grip, grip_click, grip_touch,
             a_click, a_touch, b_click, b_touch,
             system_click, menu_click,
-            right_yaw, right_pitch,
         )
         self._send(MSG_TYPE_CONTROLLER, data)
 
