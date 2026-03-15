@@ -3,11 +3,18 @@
 */
 
 #include <openvr_driver.h>
+#include <cstring>
 #include "provider/device_provider.h"
 
 AIVRDeviceProvider g_deviceProvider;
 
-extern "C" __declspec(dllexport) void* HmdDriverFactory(const char* pInterfaceName, int* pReturnCode)
+#ifdef _WIN32
+#define EXPORT extern "C" __declspec(dllexport)
+#else
+#define EXPORT extern "C" __attribute__((visibility("default")))
+#endif
+
+EXPORT void* HmdDriverFactory(const char* pInterfaceName, int* pReturnCode)
 {
     if (0 == strcmp(vr::IServerTrackedDeviceProvider_Version, pInterfaceName))
     {

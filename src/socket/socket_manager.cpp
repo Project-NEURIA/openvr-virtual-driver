@@ -1,6 +1,11 @@
 #include "socket_manager.h"
 #include <openvr_driver.h>
 #include <cstdio>
+#include <cstdarg>
+
+#ifndef _WIN32
+static inline int closesocket(SOCKET s) { return ::close(s); }
+#endif
 
 static void Log(const char* fmt, ...)
 {
@@ -33,7 +38,8 @@ SocketManager::SocketManager(
 SocketManager::~SocketManager()
 {
     // Close listen socket first so accept() stops blocking
-    closesocket(listenSocket);
+    if (listenSocket != INVALID_SOCKET)
+        closesocket(listenSocket);
 
     // Close all client sockets to unblock recv() in Receive threads
     {
@@ -48,22 +54,32 @@ SocketManager::~SocketManager()
 
     // Now safe to destroy clients — jthreads will join after recv returns
     m_clients.clear();
+
+#ifdef _WIN32
     WSACleanup();
+#endif
 }
 
 std::expected<int, std::string> SocketManager::Init()
 {
+#ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2,2), &wsa) != 0)
     {
         return std::unexpected("WSAStartup failed");
     }
+#endif
 
     listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listenSocket == INVALID_SOCKET)
     {
         return std::unexpected("socket failed");
     }
+
+#ifndef _WIN32
+    int opt = 1;
+    setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
 
     sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
@@ -111,16 +127,30 @@ void SocketManager::Connect(std::stop_token st)
     }
 }
 
+// Portable recv with MSG_WAITALL behavior
+static bool RecvAll(SOCKET sock, void* buf, size_t len)
+{
+    auto* ptr = static_cast<char*>(buf);
+    size_t remaining = len;
+    while (remaining > 0)
+    {
+        auto n = recv(sock, ptr, remaining, 0);
+        if (n <= 0)
+            return false;
+        ptr += n;
+        remaining -= n;
+    }
+    return true;
+}
+
 void SocketManager::Receive(std::stop_token st, ClientConnection* client)
 {
     while (!st.stop_requested())
     {
         MsgHeader msgHeader;
-        int bytes = recv(client->socket, reinterpret_cast<char*>(&msgHeader), sizeof(msgHeader), MSG_WAITALL);
-        if (bytes <= 0)
+        if (!RecvAll(client->socket, &msgHeader, sizeof(msgHeader)))
         {
-            int err = WSAGetLastError();
-            Log("[OVD] Client recv header failed: bytes=%d err=%d\n", bytes, err);
+            Log("[OVD] Client recv header failed\n");
             break;
         }
 
@@ -137,10 +167,9 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
         else if (msgHeader.type == MsgType::BodyPosition && msgHeader.size == sizeof(BodyPosition))
         {
             BodyPosition bodyPos;
-            bytes = recv(client->socket, reinterpret_cast<char*>(&bodyPos), sizeof(BodyPosition), MSG_WAITALL);
-            if (bytes <= 0)
+            if (!RecvAll(client->socket, &bodyPos, sizeof(BodyPosition)))
             {
-                Log("[OVD] Client recv body failed: bytes=%d\n", bytes);
+                Log("[OVD] Client recv body failed\n");
                 break;
             }
 
@@ -174,15 +203,15 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
         else if (msgHeader.type == MsgType::Controller && msgHeader.size == sizeof(ControllerInput))
         {
             ControllerInput input;
-            bytes = recv(client->socket, reinterpret_cast<char*>(&input), sizeof(ControllerInput), MSG_WAITALL);
-            if (bytes <= 0)
+            if (!RecvAll(client->socket, &input, sizeof(ControllerInput)))
             {
-                Log("[OVD] Client recv controller failed: bytes=%d\n", bytes);
+                Log("[OVD] Client recv controller failed\n");
                 break;
             }
-
-            m_leftControllerInputSender.send(input);
-            m_rightControllerInputSender.send(input);
+            if (input.hand == 0)
+                m_leftControllerInputSender.send(input);
+            else
+                m_rightControllerInputSender.send(input);
         }
         else
         {
@@ -193,12 +222,25 @@ void SocketManager::Receive(std::stop_token st, ClientConnection* client)
     }
 
     // Client disconnected — close socket and mark for cleanup.
-    // We can't erase ourselves from m_clients here because that would
-    // destroy our own jthread (which tries to join the current thread = UB).
     Log("[OVD] Client disconnected\n");
     closesocket(client->socket);
     client->socket = INVALID_SOCKET;
     client->streaming = false;
+}
+
+static bool SendAll(SOCKET sock, const void* buf, size_t len)
+{
+    auto* ptr = static_cast<const char*>(buf);
+    size_t remaining = len;
+    while (remaining > 0)
+    {
+        auto n = send(sock, ptr, remaining, 0);
+        if (n <= 0)
+            return false;
+        ptr += n;
+        remaining -= n;
+    }
+    return true;
 }
 
 bool SocketManager::SendFrame(const Frame& frame)
@@ -230,19 +272,15 @@ bool SocketManager::SendFrame(const Frame& frame)
         SOCKET sock = (*it)->socket;
         bool failed = false;
 
-        if (send(sock, reinterpret_cast<const char*>(&msgHeader), sizeof(msgHeader), 0) == SOCKET_ERROR)
+        if (!SendAll(sock, &msgHeader, sizeof(msgHeader)))
             failed = true;
-
-        if (!failed && send(sock, reinterpret_cast<const char*>(frameInfo), sizeof(frameInfo), 0) == SOCKET_ERROR)
+        if (!failed && !SendAll(sock, frameInfo, sizeof(frameInfo)))
             failed = true;
-
-        if (!failed && send(sock, reinterpret_cast<const char*>(&frame.pose), sizeof(Pose), 0) == SOCKET_ERROR)
+        if (!failed && !SendAll(sock, &frame.pose, sizeof(Pose)))
             failed = true;
-
-        if (!failed && send(sock, reinterpret_cast<const char*>(frame.leftData), pixelDataSize, 0) == SOCKET_ERROR)
+        if (!failed && !SendAll(sock, frame.leftData, pixelDataSize))
             failed = true;
-
-        if (!failed && send(sock, reinterpret_cast<const char*>(frame.rightData), pixelDataSize, 0) == SOCKET_ERROR)
+        if (!failed && !SendAll(sock, frame.rightData, pixelDataSize))
             failed = true;
 
         if (failed)
