@@ -102,11 +102,11 @@ struct BodyPosition {
 #pragma pack(pop)
 
 struct Frame {
-    const uint8_t* data;
     uint32_t width;
     uint32_t height;
-    uint32_t eye;
     Pose pose;
+    const uint8_t* leftData;
+    const uint8_t* rightData;
 };
 
 struct TrackerSenders

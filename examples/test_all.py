@@ -247,11 +247,11 @@ def test_frame_stream(client: Client):
         report("Manual start/get/stop", True)
         report("Frame has valid dimensions", frame.width > 0 and frame.height > 0,
                f"{frame.width}x{frame.height}")
-        report("Frame eye is 0 or 1", frame.eye in (0, 1), f"eye={frame.eye}")
-        report("Frame has pixel data", len(frame.data) > 0, f"{len(frame.data)} bytes")
         expected_size = frame.width * frame.height * 4  # RGBA
-        report("Pixel data size matches RGBA", len(frame.data) == expected_size,
-               f"expected={expected_size}, got={len(frame.data)}")
+        report("Left eye data size matches RGBA", len(frame.left) == expected_size,
+               f"expected={expected_size}, got={len(frame.left)}")
+        report("Right eye data size matches RGBA", len(frame.right) == expected_size,
+               f"expected={expected_size}, got={len(frame.right)}")
         report("Frame pose is not null", not frame.pose.is_null())
     except Exception as e:
         report("Manual start/get/stop", False, str(e))
@@ -268,18 +268,6 @@ def test_frame_stream(client: Client):
         report("Context manager frame_stream", True, f"received {frame_count} frames")
     except Exception as e:
         report("Context manager frame_stream", False, str(e))
-
-    # Receive both eyes
-    try:
-        eyes_seen = set()
-        with client.frame_stream() as frames:
-            for frame in frames:
-                eyes_seen.add(frame.eye)
-                if len(eyes_seen) == 2:
-                    break
-        report("Received both eyes (L+R)", len(eyes_seen) == 2, f"eyes={eyes_seen}")
-    except Exception as e:
-        report("Both eyes", False, str(e))
 
 
 def test_camera_with_frames(client: Client):
@@ -311,15 +299,16 @@ def test_save_frame(client: Client):
         import numpy as np
         from PIL import Image
 
+        out_dir = os.path.dirname(os.path.abspath(__file__))
         with client.frame_stream() as frames:
             frame = next(frames)
 
-        arr = np.frombuffer(frame.data, dtype=np.uint8).reshape(frame.height, frame.width, 4)
-        img = Image.fromarray(arr, "RGBA")
-        out_dir = os.path.dirname(os.path.abspath(__file__))
-        out_path = os.path.join(out_dir, "frame.png")
-        img.save(out_path)
-        report("Save frame to PNG", True, out_path)
+        for eye_name, data in [("left", frame.left), ("right", frame.right)]:
+            arr = np.frombuffer(data, dtype=np.uint8).reshape(frame.height, frame.width, 4)
+            img = Image.fromarray(arr, "RGBA")
+            out_path = os.path.join(out_dir, f"{eye_name}.png")
+            img.save(out_path)
+            report(f"Save {eye_name} eye to PNG", True, out_path)
     except Exception as e:
         report("Save frame to PNG", False, str(e))
 

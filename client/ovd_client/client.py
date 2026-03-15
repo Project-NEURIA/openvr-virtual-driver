@@ -17,7 +17,7 @@ MSG_TYPE_FRAME_START = 3
 MSG_TYPE_FRAME_STOP = 4
 
 MSG_HEADER_SIZE = 8
-FRAME_INFO_SIZE = 12
+FRAME_INFO_SIZE = 8
 POSE_SIZE = 28  # 7 floats
 BODY_POSITION_SIZE = POSE_SIZE * 13  # head + 12 body parts
 
@@ -57,12 +57,12 @@ class Pose:
 
 @dataclass
 class Frame:
-    """VR frame data received from the driver."""
+    """Stereo VR frame received from the driver (both eyes from the same Present() call)."""
     width: int
     height: int
-    eye: int  # 0 = left, 1 = right
     pose: Pose
-    data: bytes
+    left: bytes
+    right: bytes
 
 
 class Camera:
@@ -185,13 +185,17 @@ class Client:
             )
         self._camera_calibrated = True
 
+    def get_ipd(self) -> float:
+        """Return the inter-pupillary distance in meters."""
+        return self._camera.ipd
+
     def get_intrinsics(self) -> NDArray[np.float64]:
         """Return the 3x3 camera intrinsics matrix K."""
         return self._camera.intrinsics
 
-    def get_extrinsics(self, frame: Frame) -> NDArray[np.float64]:
-        """Return the 4x4 world-to-camera extrinsics matrix for the given frame."""
-        return self._camera.extrinsics(frame.pose, frame.eye)
+    def get_extrinsics(self, frame: Frame, eye: int = 0) -> NDArray[np.float64]:
+        """Return the 4x4 world-to-camera extrinsics matrix for the given frame and eye."""
+        return self._camera.extrinsics(frame.pose, eye)
 
     def _send(self, msg_type: int, data: bytes) -> None:
         """Send a message with header."""
@@ -229,11 +233,10 @@ class Client:
         Usage:
             with client.frame_stream() as frames:
                 for frame in frames:
-                    process(frame)
+                    process(frame.left, frame.right)
         """
         self.start_frame_stream()
         try:
-            # Calibrate camera from first frame
             first = self.get_frame()
             self._calibrate_camera(first)
             yield chain((first,), self._frame_iter())
@@ -320,22 +323,23 @@ class Client:
         self._send(MSG_TYPE_BODY_POSITION, data)
 
     def get_frame(self) -> Frame:
-        """Receive a frame from the driver (blocking)."""
+        """Receive a stereo frame from the driver (blocking)."""
         header = self._recv_exact(MSG_HEADER_SIZE)
-        msg_type, msg_size = struct.unpack("<II", header)
+        msg_type, _ = struct.unpack("<II", header)
 
         if msg_type != MSG_TYPE_FRAME:
             raise ValueError(f"Expected frame message, got type {msg_type}")
 
         frame_info = self._recv_exact(FRAME_INFO_SIZE)
-        width, height, eye = struct.unpack("<III", frame_info)
+        width, height = struct.unpack("<II", frame_info)
 
         pose_data = self._recv_exact(POSE_SIZE)
         pos_x, pos_y, pos_z, rot_w, rot_x, rot_y, rot_z = struct.unpack("<7f", pose_data)
         pose = Pose(pos_x=pos_x, pos_y=pos_y, pos_z=pos_z,
                     rot_w=rot_w, rot_x=rot_x, rot_y=rot_y, rot_z=rot_z)
 
-        pixel_size = msg_size - FRAME_INFO_SIZE - POSE_SIZE
-        pixel_data = self._recv_exact(pixel_size)
+        pixel_size = width * height * 4
+        left = self._recv_exact(pixel_size)
+        right = self._recv_exact(pixel_size)
 
-        return Frame(width=width, height=height, eye=eye, pose=pose, data=pixel_data)
+        return Frame(width=width, height=height, pose=pose, left=left, right=right)

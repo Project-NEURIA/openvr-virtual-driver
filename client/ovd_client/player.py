@@ -248,7 +248,7 @@ class Player:
                     # Display frame
                     if frame.eye == 0:  # Left eye only
                         frame_arr = np.frombuffer(frame.data, dtype=np.uint8).reshape((frame.height, frame.width, 4))
-                        rgb_frame = frame_arr[:, :, [2, 1, 0]]  # BGRA to RGB
+                        rgb_frame = frame_arr[:, :, :3]  # RGBA to RGB
                         surface = pygame.surfarray.make_surface(rgb_frame.swapaxes(0, 1))
                         window_size = screen.get_size()
                         scaled_surface = pygame.transform.scale(surface, window_size)
