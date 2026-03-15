@@ -429,10 +429,17 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
         pSyncMutex->AcquireSync(0, 10);
     }
 
+    std::vector<uint8_t> eyeBuffers[2];
+    uint32_t frameW = 0, frameH = 0;
+    bool bothEyes = true;
+
     for (int eye = 0; eye < 2; eye++)
     {
         if (s_lastSubmittedTextures[eye] == 0)
+        {
+            bothEyes = false;
             continue;
+        }
 
         ComPtr<ID3D11Texture2D> pTexture;
         HRESULT hr = m_pD3DDevice->OpenSharedResource(
@@ -441,7 +448,10 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
             reinterpret_cast<void**>(pTexture.GetAddressOf()));
 
         if (FAILED(hr) || !pTexture)
+        {
+            bothEyes = false;
             continue;
+        }
 
         D3D11_TEXTURE2D_DESC desc;
         pTexture->GetDesc(&desc);
@@ -466,7 +476,10 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
             stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 
             if (FAILED(m_pD3DDevice->CreateTexture2D(&stagingDesc, nullptr, &m_pStagingTexture)))
+            {
+                bothEyes = false;
                 continue;
+            }
 
             m_stagingWidth = desc.Width;
             m_stagingHeight = desc.Height;
@@ -477,7 +490,10 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
 
         D3D11_MAPPED_SUBRESOURCE mapped;
         if (FAILED(m_pD3DContext->Map(m_pStagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mapped)))
+        {
+            bothEyes = false;
             continue;
+        }
 
         const auto& bounds = s_lastSubmittedBounds[eye];
         uint32_t cropX = static_cast<uint32_t>(bounds.uMin * m_stagingWidth);
@@ -491,18 +507,23 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
         if (cropY + cropH > m_stagingHeight) cropH = m_stagingHeight - cropY;
 
         uint8_t* srcData = static_cast<uint8_t*>(mapped.pData);
-        std::vector<uint8_t> buffer(cropW * cropH * 4);
+        eyeBuffers[eye].resize(cropW * cropH * 4);
 
         for (uint32_t y = 0; y < cropH; y++)
         {
             const uint8_t* srcRow = srcData + (cropY + y) * mapped.RowPitch + cropX * 4;
-            uint8_t* dstRow = buffer.data() + y * cropW * 4;
+            uint8_t* dstRow = eyeBuffers[eye].data() + y * cropW * 4;
             std::copy(srcRow, srcRow + cropW * 4, dstRow);
         }
 
         m_pD3DContext->Unmap(m_pStagingTexture.Get(), 0);
+        frameW = cropW;
+        frameH = cropH;
+    }
 
-        Frame frame { buffer.data(), cropW, cropH, static_cast<uint32_t>(eye), s_lastSubmittedPose };
+    if (bothEyes && !eyeBuffers[0].empty() && !eyeBuffers[1].empty())
+    {
+        Frame frame { frameW, frameH, s_lastSubmittedPose, eyeBuffers[0].data(), eyeBuffers[1].data() };
         m_pSocketManager->SendFrame(frame);
     }
 

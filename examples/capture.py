@@ -17,21 +17,17 @@ def main():
     out_dir = os.path.dirname(os.path.abspath(__file__))
 
     with Client() as client:
-        saved = {}
         with client.frame_stream() as frames:
-            for frame in frames:
-                eye_name = "left" if frame.eye == 0 else "right"
-                if eye_name not in saved:
-                    arr = np.frombuffer(frame.data, dtype=np.uint8).reshape(
-                        frame.height, frame.width, 4
-                    )
-                    img = Image.fromarray(arr, "RGBA")
-                    out_path = os.path.join(out_dir, f"{eye_name}.png")
-                    img.save(out_path)
-                    saved[eye_name] = out_path
-                    print(f"Saved {eye_name} eye: {out_path}")
-                if len(saved) == 2:
-                    break
+            frame = next(frames)
+
+        for eye_name, data in [("left", frame.left), ("right", frame.right)]:
+            arr = np.frombuffer(data, dtype=np.uint8).reshape(
+                frame.height, frame.width, 4
+            )
+            img = Image.fromarray(arr, "RGBA")
+            out_path = os.path.join(out_dir, f"{eye_name}.png")
+            img.save(out_path)
+            print(f"Saved {eye_name} eye: {out_path}")
 
     print("Done.")
 
