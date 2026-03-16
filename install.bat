@@ -106,6 +106,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Expand chaperone play area so compositor doesn't black out frames
+:: when the virtual HMD moves far from the origin
+set "STEAM_DIR="
+for /f "usebackq tokens=*" %%a in (`powershell -NoProfile -Command "(Get-Content '%VRPATH_FILE%' | ConvertFrom-Json).config[0]"`) do (
+    set "STEAM_DIR=%%a"
+)
+if defined STEAM_DIR (
+    set "CHAP_FILE=%STEAM_DIR%\chaperone_info.vrchap"
+    if exist "!CHAP_FILE!" (
+        if not exist "!CHAP_FILE!.ovd_backup" (
+            copy "!CHAP_FILE!" "!CHAP_FILE!.ovd_backup" >nul
+            echo Backed up chaperone_info.vrchap
+        )
+    )
+    copy /y "%~dp0openvr_virtual_driver\chaperone_info.vrchap" "!STEAM_DIR!\chaperone_info.vrchap" >nul
+    echo Updated chaperone play area ^(1km x 1km^)
+)
+
 echo.
 echo Installation complete!
 echo Driver installed to: %DEST%

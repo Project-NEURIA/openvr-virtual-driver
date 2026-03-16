@@ -89,6 +89,20 @@ if exist "%DEST%" (
     exit /b 1
 )
 
+:: Restore original chaperone play area
+set "STEAM_DIR="
+for /f "usebackq tokens=*" %%a in (`powershell -NoProfile -Command "(Get-Content '%VRPATH_FILE%' | ConvertFrom-Json).config[0]"`) do (
+    set "STEAM_DIR=%%a"
+)
+if defined STEAM_DIR (
+    set "CHAP_BACKUP=%STEAM_DIR%\chaperone_info.vrchap.ovd_backup"
+    if exist "!CHAP_BACKUP!" (
+        copy /y "!CHAP_BACKUP!" "%STEAM_DIR%\chaperone_info.vrchap" >nul
+        del "!CHAP_BACKUP!" >nul
+        echo Restored original chaperone_info.vrchap
+    )
+)
+
 echo Driver uninstalled successfully.
 echo.
 pause
