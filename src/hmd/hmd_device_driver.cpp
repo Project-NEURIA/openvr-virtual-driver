@@ -929,6 +929,10 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
     if (m_vkDevice == VK_NULL_HANDLE || !m_pSocketManager)
         return;
 
+    std::vector<uint8_t> eyeBuffers[2];
+    uint32_t frameW = 0, frameH = 0;
+    bool bothEyes = false;
+
     for (int eye = 0; eye < 2; eye++)
     {
         if (s_lastSubmittedTextures[eye] == 0)
@@ -1062,14 +1066,24 @@ void Driver::Present(vr::SharedTextureHandle_t syncTexture)
         vkQueueSubmit(m_vkQueue, 1, &submitInfo, VK_NULL_HANDLE);
         vkQueueWaitIdle(m_vkQueue);
 
-        // Map and send frame data
+        // Copy frame data to eye buffer
         void* mapped = nullptr;
         if (vkMapMemory(m_vkDevice, m_stagingMemory, 0, requiredSize, 0, &mapped) == VK_SUCCESS)
         {
-            Frame frame { static_cast<const uint8_t*>(mapped), cropW, cropH, static_cast<uint32_t>(eye), s_lastSubmittedPose };
-            m_pSocketManager->SendFrame(frame);
+            eyeBuffers[eye].resize(requiredSize);
+            std::memcpy(eyeBuffers[eye].data(), mapped, requiredSize);
             vkUnmapMemory(m_vkDevice, m_stagingMemory);
         }
+
+        frameW = cropW;
+        frameH = cropH;
+        bothEyes = (eye == 1 && !eyeBuffers[0].empty());
+    }
+
+    if (bothEyes && !eyeBuffers[0].empty() && !eyeBuffers[1].empty())
+    {
+        Frame frame { frameW, frameH, s_lastSubmittedPose, eyeBuffers[0].data(), eyeBuffers[1].data() };
+        m_pSocketManager->SendFrame(frame);
     }
 }
 
