@@ -48,7 +48,8 @@ class Player:
         - Mouse: Look around
         - WASD: Move
         - 1: Trigger, 2: Grip, 3: A, 4: B, 5: Joystick click, 6: Menu
-        - Backtick + mouse: Aim right controller
+        - Backtick/RShift + mouse: Rotate right arm
+        - Backslash + mouse: Aim right hand
         - P: Play/Pause VMD, R: Reset VMD
         - ESC: Quit
         """
@@ -82,7 +83,8 @@ class Player:
 
         print("Mouse captured. Move mouse to look around. WASD to move.")
         print("R: 1=Trigger, 2=Grip, 3=A, 4=B, 9=JoyClick | L: 5=B, 6=A, 7=Trigger, 8=Grip, 0=JoyClick")
-        print("` + mouse = aim right hand. Shift + mouse = rotate left arm. Tab + mouse = aim left hand.")
+        print("` + mouse = rotate right arm. \\ + mouse = aim right hand. RShift + mouse = rotate right arm.")
+        print("LShift + mouse = rotate left arm. Tab + mouse = aim left hand.")
         print("F = toggle ready pose (hands in front). ESC to quit.")
         if vmd_player:
             print("P = Play/Pause VMD, R = Reset. T-pose sent by default.")
@@ -90,6 +92,7 @@ class Player:
         pos_x, pos_y, pos_z = 0.0, 1.7, 0.0
         yaw, pitch = 0.0, 0.0
         right_yaw, right_pitch = 0.0, 0.0
+        right_hand_yaw, right_hand_pitch = 0.0, 0.0
         left_yaw, left_pitch = 0.0, 0.0
         left_hand_yaw, left_hand_pitch = 0.0, 0.0
         ready_pose = False
@@ -145,7 +148,17 @@ class Player:
                                     right_pitch -= dy * sensitivity
                                     right_pitch = max(-math.pi / 2, min(math.pi / 2, right_pitch))
                                     position_changed = True
-                                elif keys_now[pygame.K_LSHIFT] or keys_now[pygame.K_RSHIFT]:
+                                elif keys_now[pygame.K_BACKSLASH]:
+                                    right_hand_yaw -= dx * sensitivity
+                                    right_hand_pitch -= dy * sensitivity
+                                    right_hand_pitch = max(-math.pi / 2, min(math.pi / 2, right_hand_pitch))
+                                    position_changed = True
+                                elif keys_now[pygame.K_RSHIFT]:
+                                    right_yaw -= dx * sensitivity
+                                    right_pitch -= dy * sensitivity
+                                    right_pitch = max(-math.pi / 2, min(math.pi / 2, right_pitch))
+                                    position_changed = True
+                                elif keys_now[pygame.K_LSHIFT]:
                                     left_yaw -= dx * sensitivity
                                     left_pitch -= dy * sensitivity
                                     left_pitch = max(-math.pi / 2, min(math.pi / 2, left_pitch))
@@ -241,19 +254,18 @@ class Player:
                         )
                     elif position_changed:
                         if ready_pose:
-                            self._send_ready_pose(pos_x, pos_y, pos_z, yaw, pitch, right_yaw, right_pitch, left_yaw, left_pitch, left_hand_yaw, left_hand_pitch)
+                            self._send_ready_pose(pos_x, pos_y, pos_z, yaw, pitch, right_yaw, right_pitch, left_yaw, left_pitch, left_hand_yaw, left_hand_pitch, right_hand_yaw, right_hand_pitch)
                         else:
-                            self._send_tpose(pos_x, pos_y, pos_z, yaw, pitch, right_yaw, right_pitch, left_yaw, left_pitch, left_hand_yaw, left_hand_pitch)
+                            self._send_tpose(pos_x, pos_y, pos_z, yaw, pitch, right_yaw, right_pitch, left_yaw, left_pitch, left_hand_yaw, left_hand_pitch, right_hand_yaw, right_hand_pitch)
 
-                    # Display frame
-                    if frame.eye == 0:  # Left eye only
-                        frame_arr = np.frombuffer(frame.data, dtype=np.uint8).reshape((frame.height, frame.width, 4))
-                        rgb_frame = frame_arr[:, :, :3]  # RGBA to RGB
-                        surface = pygame.surfarray.make_surface(rgb_frame.swapaxes(0, 1))
-                        window_size = screen.get_size()
-                        scaled_surface = pygame.transform.scale(surface, window_size)
-                        screen.blit(scaled_surface, (0, 0))
-                        pygame.display.flip()
+                    # Display frame (left eye)
+                    frame_arr = np.frombuffer(frame.left, dtype=np.uint8).reshape((frame.height, frame.width, 4))
+                    rgb_frame = frame_arr[:, :, :3]  # RGBA to RGB
+                    surface = pygame.surfarray.make_surface(rgb_frame.swapaxes(0, 1))
+                    window_size = screen.get_size()
+                    scaled_surface = pygame.transform.scale(surface, window_size)
+                    screen.blit(scaled_surface, (0, 0))
+                    pygame.display.flip()
 
         except ConnectionError as e:
             print(f"Connection ended: {e}")
@@ -272,30 +284,31 @@ class Player:
             return None
         return Pose(pos_x=t[0], pos_y=t[1], pos_z=t[2], rot_w=t[3], rot_x=t[4], rot_y=t[5], rot_z=t[6])
 
-    def _left_arm_poses(self, pos_x: float, pos_z: float, body_yaw: float,
-                        arm_yaw: float, arm_pitch: float,
-                        hand_yaw: float = 0.0, hand_pitch: float = 0.0) -> tuple[Pose, Pose, Pose]:
-        """Compute left shoulder, elbow, hand poses with arm rotated by aim angles.
+    def _arm_poses(self, pos_x: float, pos_z: float, body_yaw: float,
+                   arm_yaw: float, arm_pitch: float,
+                   hand_yaw: float, hand_pitch: float,
+                   side: float) -> tuple[Pose, Pose, Pose]:
+        """Compute shoulder, elbow, hand poses with arm rotated by aim angles.
 
-        The shoulder is the pivot. Elbow and hand offsets are rotated around it.
-        T-pose offsets from shoulder: elbow (-0.30, 0, 0), hand (-0.52, 0, 0).
-        Hand rotation is independent (controlled by hand_yaw/hand_pitch).
+        Args:
+            side: -1.0 for left arm, +1.0 for right arm.
         """
         cos_by = math.cos(-body_yaw)
         sin_by = math.sin(-body_yaw)
 
         # Shoulder world position (body-yaw rotated)
-        sh_x = pos_x + (-0.15) * cos_by
-        sh_z = pos_z + (-0.15) * sin_by
+        sh_offset = side * 0.15
+        sh_x = pos_x + sh_offset * cos_by
+        sh_z = pos_z + sh_offset * sin_by
 
-        # Arm direction from aim angles (pointing along -X in local space)
+        # Arm direction from aim angles (pointing along +/-X in local space)
         cp = math.cos(arm_pitch)
         sp = math.sin(arm_pitch)
         cy = math.cos(arm_yaw)
         sy = math.sin(arm_yaw)
-        dx = -cp * cy
+        dx = side * cp * cy
         dy = sp
-        dz = -cp * sy
+        dz = side * cp * sy
         # Rotate arm direction by body yaw
         world_dx = dx * cos_by - dz * sin_by
         world_dz = dx * sin_by + dz * cos_by
@@ -311,6 +324,16 @@ class Player:
                     rot_w=hand_qw, rot_x=hand_qx, rot_y=hand_qy, rot_z=hand_qz)
         return shoulder, elbow, hand
 
+    def _left_arm_poses(self, pos_x: float, pos_z: float, body_yaw: float,
+                        arm_yaw: float, arm_pitch: float,
+                        hand_yaw: float = 0.0, hand_pitch: float = 0.0) -> tuple[Pose, Pose, Pose]:
+        return self._arm_poses(pos_x, pos_z, body_yaw, arm_yaw, arm_pitch, hand_yaw, hand_pitch, side=-1.0)
+
+    def _right_arm_poses(self, pos_x: float, pos_z: float, body_yaw: float,
+                         arm_yaw: float, arm_pitch: float,
+                         hand_yaw: float = 0.0, hand_pitch: float = 0.0) -> tuple[Pose, Pose, Pose]:
+        return self._arm_poses(pos_x, pos_z, body_yaw, arm_yaw, arm_pitch, hand_yaw, hand_pitch, side=1.0)
+
     def _send_left_arm(self, pos_x: float, pos_z: float, body_yaw: float,
                        arm_yaw: float, arm_pitch: float,
                        hand_yaw: float = 0.0, hand_pitch: float = 0.0) -> None:
@@ -321,49 +344,39 @@ class Player:
     def _send_ready_pose(self, pos_x: float, pos_y: float, pos_z: float, yaw: float, pitch: float,
                          right_yaw: float = 0.0, right_pitch: float = 0.0,
                          left_yaw: float = 0.0, left_pitch: float = 0.0,
-                         left_hand_yaw: float = 0.0, left_hand_pitch: float = 0.0) -> None:
+                         left_hand_yaw: float = 0.0, left_hand_pitch: float = 0.0,
+                         right_hand_yaw: float = 0.0, right_hand_pitch: float = 0.0) -> None:
         """Send ready pose — arms bent, hands in front of chest, close together."""
         cos_yaw = math.cos(-yaw)
         sin_yaw = math.sin(-yaw)
 
-        def rotated_pos(offset_x: float, height: float, offset_z: float = 0.0):
+        def rotated_pose(offset_x: float, height: float, offset_z: float = 0.0) -> Pose:
             rx = offset_x * cos_yaw - offset_z * sin_yaw
             rz = offset_x * sin_yaw + offset_z * cos_yaw
-            return pos_x + rx, height, pos_z + rz
-
-        def rotated_pose(offset_x: float, height: float, offset_z: float = 0.0) -> Pose:
-            x, y, z = rotated_pos(offset_x, height, offset_z)
             qw, qx, qy, qz = _euler_to_quaternion(yaw, 0.0)
-            return Pose(pos_x=x, pos_y=y, pos_z=z, rot_w=qw, rot_x=qx, rot_y=qy, rot_z=qz)
+            return Pose(pos_x=pos_x + rx, pos_y=height, pos_z=pos_z + rz, rot_w=qw, rot_x=qx, rot_y=qy, rot_z=qz)
 
         head_qw, head_qx, head_qy, head_qz = _euler_to_quaternion(yaw, pitch)
         head = Pose(pos_x=pos_x, pos_y=pos_y, pos_z=pos_z, rot_w=head_qw, rot_x=head_qx, rot_y=head_qy, rot_z=head_qz)
 
-        # Right hand in front of chest
-        r_qw, r_qx, r_qy, r_qz = _euler_to_quaternion(yaw + right_yaw, right_pitch)
-        rh_x, rh_y, rh_z = rotated_pos(0.15, 1.45, -0.25)
-        right_hand = Pose(pos_x=rh_x, pos_y=rh_y, pos_z=rh_z,
-                          rot_w=r_qw, rot_x=r_qx, rot_y=r_qy, rot_z=r_qz)
-
         # Left arm uses shoulder pivot — offset so default is in front of chest
-        # In T-pose arm points along -X (yaw=0). Rotate ~90° to point forward (-Z).
-        # Also pitch up slightly so hand is at chest height.
-        ready_arm_yaw = left_yaw + math.pi / 2
-        ready_arm_pitch = left_pitch - 0.3
-        left_shoulder, left_elbow, left_hand = self._left_arm_poses(pos_x, pos_z, yaw, ready_arm_yaw, ready_arm_pitch, left_hand_yaw, left_hand_pitch)
+        ready_left_yaw = left_yaw + math.pi / 2
+        ready_left_pitch = left_pitch - 0.3
+        left_shoulder, left_elbow, left_hand = self._left_arm_poses(pos_x, pos_z, yaw, ready_left_yaw, ready_left_pitch, left_hand_yaw, left_hand_pitch)
 
-        # Right elbow bent forward
-        re_x, re_y, re_z = rotated_pos(0.20, 1.35, -0.10)
-        body_qw, body_qx, body_qy, body_qz = _euler_to_quaternion(yaw, 0.0)
+        # Right arm uses shoulder pivot — mirror of left
+        ready_right_yaw = right_yaw - math.pi / 2
+        ready_right_pitch = right_pitch - 0.3
+        right_shoulder, right_elbow, right_hand = self._right_arm_poses(pos_x, pos_z, yaw, ready_right_yaw, ready_right_pitch, right_hand_yaw, right_hand_pitch)
 
         self._client.update_pose(
             head=head,
             waist=rotated_pose(0.0, 0.93),
             chest=rotated_pose(0.0, 1.29),
             left_shoulder=left_shoulder,
-            right_shoulder=rotated_pose(0.15, 1.41),
+            right_shoulder=right_shoulder,
             left_elbow=left_elbow,
-            right_elbow=Pose(pos_x=re_x, pos_y=re_y, pos_z=re_z, rot_w=body_qw, rot_x=body_qx, rot_y=body_qy, rot_z=body_qz),
+            right_elbow=right_elbow,
             left_hand=left_hand,
             right_hand=right_hand,
             left_knee=rotated_pose(-0.09, 0.46),
@@ -375,7 +388,8 @@ class Player:
     def _send_tpose(self, pos_x: float, pos_y: float, pos_z: float, yaw: float, pitch: float,
                     right_yaw: float = 0.0, right_pitch: float = 0.0,
                     left_yaw: float = 0.0, left_pitch: float = 0.0,
-                    left_hand_yaw: float = 0.0, left_hand_pitch: float = 0.0) -> None:
+                    left_hand_yaw: float = 0.0, left_hand_pitch: float = 0.0,
+                    right_hand_yaw: float = 0.0, right_hand_pitch: float = 0.0) -> None:
         """Send T-pose body position rotated by yaw, with optional hand aim."""
         cos_yaw = math.cos(-yaw)
         sin_yaw = math.sin(-yaw)
@@ -389,22 +403,20 @@ class Player:
         head_qw, head_qx, head_qy, head_qz = _euler_to_quaternion(yaw, pitch)
         head = Pose(pos_x=pos_x, pos_y=pos_y, pos_z=pos_z, rot_w=head_qw, rot_x=head_qx, rot_y=head_qy, rot_z=head_qz)
 
-        # Right hand aim
-        r_qw, r_qx, r_qy, r_qz = _euler_to_quaternion(yaw + right_yaw, right_pitch)
-        right_hand = Pose(pos_x=pos_x + 0.67 * cos_yaw, pos_y=1.41, pos_z=pos_z + 0.67 * sin_yaw,
-                          rot_w=r_qw, rot_x=r_qx, rot_y=r_qy, rot_z=r_qz)
-
         # Left arm (shoulder as pivot, hand rotation independent)
         left_shoulder, left_elbow, left_hand = self._left_arm_poses(pos_x, pos_z, yaw, left_yaw, left_pitch, left_hand_yaw, left_hand_pitch)
+
+        # Right arm (shoulder as pivot, hand rotation independent)
+        right_shoulder, right_elbow, right_hand = self._right_arm_poses(pos_x, pos_z, yaw, right_yaw, right_pitch, right_hand_yaw, right_hand_pitch)
 
         self._client.update_pose(
             head=head,
             waist=rotated_pose(0.0, 0.93),
             chest=rotated_pose(0.0, 1.29),
             left_shoulder=left_shoulder,
-            right_shoulder=rotated_pose(0.15, 1.41),
+            right_shoulder=right_shoulder,
             left_elbow=left_elbow,
-            right_elbow=rotated_pose(0.45, 1.41),
+            right_elbow=right_elbow,
             left_hand=left_hand,
             right_hand=right_hand,
             left_knee=rotated_pose(-0.09, 0.46),
